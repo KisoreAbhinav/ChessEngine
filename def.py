@@ -1,6 +1,5 @@
 from enum import IntEnum
 
-#local repo test 2
 U64 = int
 # arbitrary precision
 # instead of using unsigned long long int in C, we just define it, as python handles it

@@ -106,7 +106,7 @@ class Castling(IntEnum):
 
 class Undo:
     __slots__ = ("move", "castle_perm", "en_passant", "fifty_move", "pos_key")
-    def __init__(self, move, castle_perm, en_passant, fifty_move, pos_key):
+    def __init__(self, move=0, castle_perm=0, en_passant=0, fifty_move=0, pos_key=0):
         self.move = move
         self.castle_perm = castle_perm
         self.en_passant = en_passant
@@ -118,6 +118,20 @@ class Undo:
 # fifty_move -> stores the counter of the 50 move rule; reset by every pawn push or piece captures
 # pos_key -> the Zobrist hash key that of the attributes of the board of the previous move
     
+
+
+#--------------------------------------------------------------------------------------------------
+# Look Up Tables
+#--------------------------------------------------------------------------------------------------
+
+Sq120to64 = [0] * BOARD_SQ_NUM
+Sq64to120 = [0] * 64
+
+FilesBoard = [0]*BOARD_SQ_NUM
+RanksBoard = [0]*BOARD_SQ_NUM
+
+def FR2SQ(f, r):
+    return (21*(f) + (r)*10)
 
 #--------------------------------------------------------------------------------------------------
 # Board Constants/Conditions

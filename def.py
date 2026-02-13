@@ -198,3 +198,37 @@ class Board:
 
 # Class Board stores the board's attributes, lets say, its the opening, what pieces have moved, in what order, what pieces have been traded, etc etc 
 # Stores basically a screenshot of a board at a current position
+
+
+
+#--------------------------------------------------------------------------------------------------
+# 120 board to 64 board
+#--------------------------------------------------------------------------------------------------
+def init_sq120tosq64():
+
+    #First we setup fail conditions
+    # This makes sure that the offboard conditions return a recognizable value
+    # Here adding 65 to the mapping -> there are only 64 squares on a board, hence 65 is recognizable
+    for index in range (BOARD_SQ_NUM):
+        Sq120to64[index] = 65
+        FilesBoard = Square.NO_SQ  #NO_SQ is used as an OFFBOARD marker as discussed earlier
+        RanksBoard = Square.NO_SQ #NO_SQ is used as an OFFBOARD marker as discussed earlier
+
+    for index in range (64):
+        Sq64to120 = 120
+    
+    # Loop through the valid 64 squares
+    sq64 = 0
+    for rank in range (Ranks.RANK_1, Ranks.RANK_8+1):
+        for file in range (File.FILE_1, File.FILE_8+1):
+            sq120 = FR2SQ(file, rank)
+
+            # Linking the 2 arrays
+            Sq64to120[sq64] = sq120
+            Sq120to64[sq120] = sq64
+
+            #Setting the Rank and File arrays
+            FilesBoard[sq120] = file
+            RanksBoard[sq120] = rank
+
+            sq64 += 1

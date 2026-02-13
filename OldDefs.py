@@ -131,7 +131,7 @@ FilesBoard = [0]*BOARD_SQ_NUM
 RanksBoard = [0]*BOARD_SQ_NUM
 
 def FR2SQ(f, r):
-    return (21*(f) + (r)*10)
+    return (21 + (f) + (r)*10)
 
 #--------------------------------------------------------------------------------------------------
 # Board Constants/Conditions
@@ -232,3 +232,6 @@ def init_sq120tosq64():
             RanksBoard[sq120] = rank
 
             sq64 += 1
+
+def AllInit():
+    init_sq120tosq64()

@@ -133,6 +133,9 @@ RanksBoard = [0]*BOARD_SQ_NUM
 def FR2SQ(f, r):
     return (21 + (f) + (r)*10)
 
+def Sq120(sq120):
+    return Sq120to64[sq120]
+
 #--------------------------------------------------------------------------------------------------
 # Board Constants/Conditions
 #--------------------------------------------------------------------------------------------------
@@ -234,7 +237,7 @@ def init_sq120tosq64():
     for index in range (64):
         Sq64to120 [index] = 120
     
-    # Loop through the valid 64 squares
+    # Looping through the valid 64 squares of the board
     sq64 = 0
     for rank in range (Ranks.RANK_1, Ranks.RANK_8+1):
         for file in range (File.FILE_1, File.FILE_8+1):
@@ -252,3 +255,19 @@ def init_sq120tosq64():
 
 def AllInit():
     init_sq120tosq64()
+
+def print_bitboard(bitboard: int):
+
+    for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
+        line = f"{rank + 1}  " # Rank indicator
+        for file in range(File.FILE_1, File.FILE_8 + 1):
+            sq120 = FR2SQ(file, rank)
+            sq64 = Sq120to64[sq120]
+
+            if (1 << sq64) & bitboard:
+                line += "X "
+            else:
+                line += "- "
+        print(line)
+        
+    print("   a b c d e f g h\n")

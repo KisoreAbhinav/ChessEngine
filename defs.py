@@ -256,6 +256,14 @@ def init_sq120tosq64():
 def AllInit():
     init_sq120tosq64()
 
+
+
+
+# BIT BOARDS
+#
+#
+#
+
 def print_bitboard(bitboard: int):
 
     for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
@@ -271,3 +279,43 @@ def print_bitboard(bitboard: int):
         print(line)
         
     print("   a b c d e f g h\n")
+
+
+BIT_TABLE = [
+    63, 30, 3, 32, 25, 41, 22, 33, 15, 50, 42, 13, 11, 53, 19, 34,
+    52, 31, 2, 31, 24, 40, 21, 45, 10, 18, 47, 1, 54, 9, 57, 0,
+    35, 62, 4, 26, 60, 6, 23, 44, 46, 27, 56, 16, 7, 39, 48, 24,
+    59, 58, 20, 37, 17, 36, 8
+]
+
+def count_bits(b: int) -> int:
+    """
+    Brian Kernighan's Algorithm as shown in the image.
+    Counts the number of set bits (1s) in a 64-bit integer.
+    """
+    r = 0
+    while b:
+        b &= (b - 1) # This clears the least significant bit
+        r += 1
+    return r
+
+def pop_bit(bb: int) -> tuple[int, int]:
+    """
+    Identifies the square index of the first bit and removes it.
+    Returns (index, updated_bitboard).
+    """
+    if bb == 0:
+        return -1, 0
+    
+    # Mirroring the De Bruijn sequence/folding logic from the image
+    # We can also use Python's built-in bit_length() for cleaner LSB detection:
+    b = bb ^ (bb - 1)
+    fold = ( (b & 0xffffffff) ^ (b >> 32) ) & 0xffffffff
+    
+    # Calculate index using the BitTable
+    index = BIT_TABLE[( (fold * 0x783a9b23) & 0xffffffff ) >> 26]
+    
+    # Update the bitboard by clearing the LSB
+    bb &= (bb - 1)
+    
+    return index, bb

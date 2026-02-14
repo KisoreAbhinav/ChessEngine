@@ -140,7 +140,7 @@ class Board:
     __slots__ = ("pieces", "pawns", "king_sq", "side", 
                  "en_passant", "fifty_move", "ply", 
                  "his_ply", "pos_key", "pce_num", "big_pce", 
-                 "maj_pce", "min_pce", "castle_perm", "history")
+                 "maj_pce", "min_pce", "castle_perm", "history", "p_list")
 
     def __init__(self):
         self.pieces = [Pieces.EMPTY] * BOARD_SQ_NUM 
@@ -195,6 +195,23 @@ class Board:
         self.history = [Undo() for _ in range (MAX_GAME_MOVES)]
         # stores all the unique board positions and attributes of each move upto the maximum game moves, for this engine, set to 2048
         
+        self.p_list = [[Square.NO_SQ for _ in range (10)] for _ in range (13)]
+        # Total number of pieces including an empty square can be 13
+        # At any given instance, the maximum number of piece of any type can be 10
+        # Example - 2 rooks and all pawns promoted to rooks so 2 + 8 = 10
+
+    def check_board(self):
+
+        temp_pce_num = [0] * 13
+        for t_pce in [Pieces.W_PAWN, Pieces.W_KNIGHT, Pieces.W_BISHOP, 
+                     Pieces.W_ROOK, Pieces.W_QUEEN, Pieces.W_KING,
+                     Pieces.B_PAWN, Pieces.B_KNIGHT, Pieces.B_BISHOP, 
+                     Pieces.B_ROOK, Pieces.B_QUEEN, Pieces.B_KING]:
+           
+           for j in range(self.pce_num[t_pce]):
+               sq = self.p_list[t_pce][j]
+               # ASSERT: The piece at this square in the piece list must match the board
+               assert self.pieces[sq] == t_pce, f"Piece List mismatch at {sq}"
 
 # Class Board stores the board's attributes, lets say, its the opening, what pieces have moved, in what order, what pieces have been traded, etc etc 
 # Stores basically a screenshot of a board at a current position

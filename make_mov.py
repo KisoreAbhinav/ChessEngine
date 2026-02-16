@@ -108,6 +108,8 @@ def AddPiece(sq, pos, pce):
     pos.pce_num[pce] += 1
 
 def MakeMove(pos, move):
+    assert pos.check_board()
+
     from_sq = FROMSQ(move)
     to_sq = TOSQ(move)
     side = pos.side
@@ -183,6 +185,7 @@ def MakeMove(pos, move):
         TakeMove(pos)
         return False
 
+    assert pos.check_board()
     return True
 
 def MovePiece(from_sq, to_sq, pos):
@@ -444,6 +447,8 @@ def MovePiece(from_sq, to_sq, pos):
         pos.king_sq[Side.BLACK] = to_sq
 
 def TakeMove(pos):
+    assert pos.check_board()
+
     # 1. Move the counters back
     pos.his_ply -= 1
     pos.ply -= 1
@@ -500,6 +505,8 @@ def TakeMove(pos):
     pos.fifty_move = pos.history[pos.his_ply].fifty_move
     pos.en_passant = pos.history[pos.his_ply].en_passant
     pos.pos_key = pos.history[pos.his_ply].pos_key
+
+    assert pos.check_board()
 
 # def TakeMove(pos):
 #     """Undoes the last move made on the board using the history array."""

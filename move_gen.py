@@ -2,6 +2,16 @@
 from defs import *
 
 MAX_POS_MOVES = 256
+VictimScore = [0, 100, 200, 300, 400, 500, 600, 100, 200, 300, 400, 500, 600]
+MvvLvaScores = [[0 for _ in range(13)] for _ in range(13)]
+
+
+def InitMvvLva():
+    for attacker in range(Pieces.wP, Pieces.bK + 1):
+        for victim in range(Pieces.wP, Pieces.bK + 1):
+            MvvLvaScores[victim][attacker] = (
+                VictimScore[victim] + 6 - (VictimScore[attacker] // 100)
+            )
 
 
 # The '0' at the end of each sequence acts as a terminator for the while loop
@@ -27,18 +37,32 @@ class MoveList:
         self.count = 0
 
 def AddQuietMove(pos, move, list):
+    assert SqOnBoard(FROMSQ(move))
+    assert SqOnBoard(TOSQ(move))
     list.moves[list.count].move = move
     list.moves[list.count].score = 0
     list.count += 1
 
 def AddCaptureMove(pos, move, list):
+    assert SqOnBoard(FROMSQ(move))
+    assert SqOnBoard(TOSQ(move))
+    assert PieceValidEmpty(CAPTURED(move))
+
+    attacker = pos.pieces[FROMSQ(move)]
+    victim = CAPTURED(move)
     list.moves[list.count].move = move
-    list.moves[list.count].score = 0
+    list.moves[list.count].score = MvvLvaScores[victim][attacker]
     list.count += 1
 
 def AddEnPassantMove(pos, move, list):
+    assert SqOnBoard(FROMSQ(move))
+    assert SqOnBoard(TOSQ(move))
+    assert pos.en_passant != Square.NO_SQ
+    assert TOSQ(move) == pos.en_passant
+
     list.moves[list.count].move = move
-    list.moves[list.count].score = 0
+    # En passant is pawn takes pawn.
+    list.moves[list.count].score = 105
     list.count += 1
 
 def AddWhitePawnCaptureMove(board, from_sq, to_sq, cap, move_list):
@@ -137,6 +161,42 @@ def generate_black_pawn_moves(pos, move_list):
                     AddEnPassantMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, EP_FLAG), move_list)
 
 
+def generate_white_pawn_captures(pos, move_list):
+    for pce_num in range(pos.pce_num[Pieces.wP]):
+        sq = pos.p_list[Pieces.wP][pce_num]
+        assert SqOnBoard(sq)
+
+        for off in [9, 11]:
+            target_sq = sq + off
+            if not SqOnBoard(target_sq):
+                continue
+
+            pce = pos.pieces[target_sq]
+            if pce != Pieces.EMPTY and PieceCol[pce] == Side.BLACK:
+                AddWhitePawnCaptureMove(pos, sq, target_sq, pce, move_list)
+
+            if pos.en_passant != Square.NO_SQ and target_sq == pos.en_passant:
+                AddEnPassantMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, EP_FLAG), move_list)
+
+
+def generate_black_pawn_captures(pos, move_list):
+    for pce_num in range(pos.pce_num[Pieces.bP]):
+        sq = pos.p_list[Pieces.bP][pce_num]
+        assert SqOnBoard(sq)
+
+        for off in [-9, -11]:
+            target_sq = sq + off
+            if not SqOnBoard(target_sq):
+                continue
+
+            pce = pos.pieces[target_sq]
+            if pce != Pieces.EMPTY and PieceCol[pce] == Side.WHITE:
+                AddBlackPawnCaptureMove(pos, sq, target_sq, pce, move_list)
+
+            if pos.en_passant != Square.NO_SQ and target_sq == pos.en_passant:
+                AddEnPassantMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, EP_FLAG), move_list)
+
+
 def GenerateAllMoves(pos, move_list):
     move_list.count = 0
     side = pos.side
@@ -220,3 +280,78 @@ def GenerateAllMoves(pos, move_list):
                     AddQuietMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, 0), move_list)
         pce_idx += 1
         pce = LoopNonSlidePiece[pce_idx]
+
+
+def GenerateAllCaps(pos, move_list):
+    move_list.count = 0
+    side = pos.side
+
+    if side == Side.WHITE:
+        generate_white_pawn_captures(pos, move_list)
+    else:
+        generate_black_pawn_captures(pos, move_list)
+
+    # Sliding pieces: captures only
+    pce_idx = LoopSlideIndex[side]
+    pce = LoopSlidePiece[pce_idx]
+    while pce != 0:
+        for i in range(pos.pce_num[pce]):
+            sq = pos.p_list[pce][i]
+            for index in range(NumDir[pce]):
+                direction = PceDir[pce][index]
+                target_sq = sq + direction
+
+                while SqOnBoard(target_sq):
+                    target_pce = pos.pieces[target_sq]
+                    if target_pce != Pieces.EMPTY:
+                        if PieceCol[target_pce] == (side ^ 1):
+                            AddCaptureMove(
+                                pos,
+                                MOVE(sq, target_sq, target_pce, Pieces.EMPTY, 0),
+                                move_list,
+                            )
+                        break
+                    target_sq += direction
+        pce_idx += 1
+        pce = LoopSlidePiece[pce_idx]
+
+    # Non-sliding pieces: captures only
+    pce_idx = LoopNonSlideIndex[side]
+    pce = LoopNonSlidePiece[pce_idx]
+    while pce != 0:
+        for i in range(pos.pce_num[pce]):
+            sq = pos.p_list[pce][i]
+            for index in range(NumDir[pce]):
+                direction = PceDir[pce][index]
+                target_sq = sq + direction
+                if not SqOnBoard(target_sq):
+                    continue
+
+                target_pce = pos.pieces[target_sq]
+                if target_pce != Pieces.EMPTY and PieceCol[target_pce] == (side ^ 1):
+                    AddCaptureMove(
+                        pos,
+                        MOVE(sq, target_sq, target_pce, Pieces.EMPTY, 0),
+                        move_list,
+                    )
+        pce_idx += 1
+        pce = LoopNonSlidePiece[pce_idx]
+
+
+def MoveExists(pos, move):
+    """
+    Returns True if `move` is legal in the current position.
+    """
+    from make_mov import MakeMove, TakeMove
+
+    move_list = MoveList()
+    GenerateAllMoves(pos, move_list)
+
+    for move_num in range(move_list.count):
+        candidate = move_list.moves[move_num].move
+        if not MakeMove(pos, candidate):
+            continue
+        TakeMove(pos)
+        if candidate == move:
+            return True
+    return False

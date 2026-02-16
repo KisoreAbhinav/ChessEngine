@@ -7,6 +7,8 @@ def AllInit():
     init_sq120tosq64()
     from hashkeys import init_hash_keys
     init_hash_keys()
+    from move_gen import InitMvvLva
+    InitMvvLva()
 
 
 U64 = int
@@ -18,6 +20,7 @@ MAX_GAME_MOVES = 2048
 # maximum number of moves (mostly engines use numbers between 1024 to 4096)
 # these are half moves
 # used to keep a track of the game, and use undos 
+MAXDEPTH = 64
 
 
 ENGINE_NAME = "Hydra 1.0"
@@ -133,6 +136,41 @@ class Move:
         self.score = 0  # An integer used for move ordering (sorting)
 
 
+class SearchInfo:
+    __slots__ = (
+        "start_time",
+        "stop_time",
+        "depth",
+        "depth_set",
+        "time_set",
+        "moves_to_go",
+        "infinite",
+        "nodes",
+        "quit",
+        "stopped",
+        "fh",
+        "fhf",
+        "stdin_enabled",
+        "stdin_buffer",
+    )
+
+    def __init__(self):
+        self.start_time = 0
+        self.stop_time = 0
+        self.depth = 0
+        self.depth_set = 0
+        self.time_set = 0
+        self.moves_to_go = 0
+        self.infinite = 0
+        self.nodes = 0
+        self.quit = 0
+        self.stopped = 0
+        self.fh = 0.0
+        self.fhf = 0.0
+        self.stdin_enabled = 1
+        self.stdin_buffer = ""
+
+
 #--------------------------------------------------------------------------------------------------
 # Look Up Tables
 #--------------------------------------------------------------------------------------------------
@@ -222,7 +260,8 @@ class Board:
                  "en_passant", "fifty_move", "ply", 
                  "his_ply", "pos_key", "pce_num", "big_pce", 
                  "maj_pce", "min_pce", "castle_perm", "history", "p_list",
-                 "material")
+                 "material", "pv_table", "pv_array",
+                 "search_history", "search_killers")
 
     def __init__(self):
         self.pieces = [Pieces.EMPTY] * BOARD_SQ_NUM 
@@ -284,6 +323,13 @@ class Board:
 
         self.material = [0,0,0]
         # White and Black's material Score
+
+        from pvtable import PVTable, InitPvTable
+        self.pv_table = PVTable()
+        InitPvTable(self.pv_table)
+        self.pv_array = [0] * MAXDEPTH
+        self.search_history = [[0 for _ in range(120)] for _ in range(13)]
+        self.search_killers = [[0 for _ in range(MAXDEPTH)] for _ in range(2)]
 
 
     def check_board(self):

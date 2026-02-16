@@ -258,6 +258,116 @@ class Board:
         self.castle_perm = 0
         self.pos_key = 0
 
+
+    def update_lists_material(self):
+        for i in range(13):
+            self.pce_num[i] = 0
+        for i in range(3):
+            self.big_pce[i] = 0
+            self.maj_pce[i] = 0
+            self.min_pce[i] = 0
+            self.pawns[i] = 0 
+
+        for i in range(64):
+            sq = Sq64to120[i]
+            pce = self.pieces[sq]
+            if pce != Pieces.EMPTY:
+                col = PieceCol[pce]
+                
+                # Use the helper arrays to increment counts
+                if PieceBig[pce]: self.big_pce[col] += 1
+                if PieceMaj[pce]: self.maj_pce[col] += 1
+                if PieceMin[pce]: self.min_pce[col] += 1
+                
+                if pce == Pieces.wP:
+                    self.pawns[Side.WHITE] |= (1 << i)
+                    self.pawns[Side.BOTH] |= (1 << i)
+                elif pce == Pieces.bP:
+                    self.pawns[Side.BLACK] |= (1 << i)
+                    self.pawns[Side.BOTH] |= (1 << i)
+                
+                self.p_list[pce][self.pce_num[pce]] = sq
+                self.pce_num[pce] += 1
+                
+                if pce == Pieces.wK: self.king_sq[Side.WHITE] = sq
+                if pce == Pieces.bK: self.king_sq[Side.BLACK] = sq
+
+    def parse_fen(self, fen):
+        self.reset_board()
+        
+        piece_map = {
+            'P': Pieces.wP, 'N': Pieces.wN, 'B': Pieces.wB, 
+            'R': Pieces.wR, 'Q': Pieces.wQ, 'K': Pieces.wK,
+            'p': Pieces.bP, 'n': Pieces.bN, 'b': Pieces.bB, 
+            'r': Pieces.bR, 'q': Pieces.bQ, 'k': Pieces.bK
+        }
+        # based on the way FEN works, we map our variables with the one in the notation
+
+        
+        tokens = fen.split()
+        placement = tokens[0]
+        side_to_move = tokens[1]
+        castling = tokens[2]
+        en_passant = tokens[3]
+        #split the fen token using FEN rules
+
+        # Extraction of the Data from the FEN string
+        rank = Ranks.RANK_8
+        file = File.FILE_1
+
+        for char in placement:
+            if char == '/':
+                rank -= 1
+                file = File.FILE_1
+            elif char.isdigit():
+                file += int(char)
+            else:
+                piece = piece_map[char]
+                sq120 = FR2SQ(file, rank)
+                self.pieces[sq120] = piece
+                file += 1
+
+        # Get Side to Move
+        self.side = Side.WHITE if side_to_move == 'w' else Side.BLACK
+
+        # Get Castling Permissions
+        for char in castling:
+            if char == 'K': self.castle_perm |= Castling.WKSC
+            if char == 'Q': self.castle_perm |= Castling.WQSC
+            if char == 'k': self.castle_perm |= Castling.BKSC
+            if char == 'q': self.castle_perm |= Castling.BQSC
+
+        # Get En Passant Square
+        if en_passant != '-':
+            f = ord(en_passant[0]) - ord('a')
+            r = int(en_passant[1]) - 1
+            self.en_passant = FR2SQ(f, r)
+
+        
+        self.update_lists_material()
+
+        # Generating a unique position key using the hashkeys function
+        from hashkeys import generate_pos_key
+        self.pos_key = generate_pos_key(self)
+
+    def print_board(self):
+        print("\nGame Board:")
+        pce_char = ".PNBRQKpnbrqk"
+        
+        for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
+            line = f"{rank + 1}  "
+            for file in range(File.FILE_1, File.FILE_8 + 1):
+                sq = FR2SQ(file, rank)
+                pce = self.pieces[sq]
+                line += f"{pce_char[pce]} "
+            print(line)
+            
+        print("   a b c d e f g h")
+        print(f"Side: {'white' if self.side == Side.WHITE else 'black'}")
+        print(f"EnPassant: {self.en_passant}")
+        print(f"Castle: {self.castle_perm:x}")
+        print(f"PosKey: {self.pos_key:X}")
+
 # Class Board stores the board's attributes, lets say, its the opening, what pieces have moved, in what order, what pieces have been traded, etc etc 
 # Stores basically a screenshot of a board at a current position
 
@@ -296,7 +406,15 @@ def init_sq120tosq64():
             sq64 += 1
 
 
-
+# Material Calculation for FEN parsing
+# [EMPTY, wP, wN, wB, wR, wQ, wK, bP, bN, bB, bR, bQ, bK]
+# Kings are counted as Big and Major in Bluefever's implementation
+PieceBig = [ False, False, True, True, True, True, True, False, True, True, True, True, True ]
+PieceMaj = [ False, False, False, False, True, True, True, False, False, False, True, True, True ]
+PieceMin = [ False, False, True, True, False, False, False, False, True, True, False, False, False ]
+PieceVal = [ 0, 100, 325, 325, 550, 1000, 50000, 100, 325, 325, 550, 1000, 50000 ]
+PieceCol = [ Side.BOTH, Side.WHITE, Side.WHITE, Side.WHITE, Side.WHITE, Side.WHITE, Side.WHITE,
+             Side.BLACK, Side.BLACK, Side.BLACK, Side.BLACK, Side.BLACK, Side.BLACK ]
 
 
 # BIT BOARDS
@@ -362,4 +480,4 @@ def AllInit():
     init_sq120tosq64()
     from hashkeys import init_hash_keys
     init_sq120tosq64()
-    init_hash_keys
+    init_hash_keys()

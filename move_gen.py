@@ -141,55 +141,82 @@ def GenerateAllMoves(pos, move_list):
     move_list.count = 0
     side = pos.side
 
-    # 1. Handle Pawns (Keep these separate as they are unique)
     if side == Side.WHITE:
         generate_white_pawn_moves(pos, move_list)
+        
+        # --- White Castling Logic ---
+        # Kingside: Check if squares f1, g1 are empty and e1, f1 are not attacked
+        if pos.castle_perm & Castling.WKSC:
+            if pos.pieces[Square.F1] == Pieces.EMPTY and pos.pieces[Square.G1] == Pieces.EMPTY:
+                if not pos.is_sq_attacked(Square.E1, Side.BLACK) and not pos.is_sq_attacked(Square.F1, Side.BLACK):
+                    AddQuietMove(pos, MOVE(Square.E1, Square.G1, Pieces.EMPTY, Pieces.EMPTY, MFLAG_CA), move_list)
+
+        # Queenside: Check if d1, c1, b1 are empty and e1, d1 are not attacked
+        if pos.castle_perm & Castling.WQSC:
+            if pos.pieces[Square.D1] == Pieces.EMPTY and pos.pieces[Square.C1] == Pieces.EMPTY and pos.pieces[Square.B1] == Pieces.EMPTY:
+                if not pos.is_sq_attacked(Square.E1, Side.BLACK) and not pos.is_sq_attacked(Square.D1, Side.BLACK):
+                    AddQuietMove(pos, MOVE(Square.E1, Square.C1, Pieces.EMPTY, Pieces.EMPTY, MFLAG_CA), move_list)
     else:
         generate_black_pawn_moves(pos, move_list)
+        
+        # --- Black Castling Logic ---
+        # Kingside: Check if f8, g8 are empty and e8, f8 are not attacked
+        if pos.castle_perm & Castling.BKSC:
+            if pos.pieces[Square.F8] == Pieces.EMPTY and pos.pieces[Square.G8] == Pieces.EMPTY:
+                if not pos.is_sq_attacked(Square.E8, Side.WHITE) and not pos.is_sq_attacked(Square.F8, Side.WHITE):
+                    AddQuietMove(pos, MOVE(Square.E8, Square.G8, Pieces.EMPTY, Pieces.EMPTY, MFLAG_CA), move_list)
 
-    # 2. Loop through Sliding Pieces (Bishops, Rooks, Queens)
+        # Queenside: Check if d8, c8, b8 are empty and e8, d8 are not attacked
+        if pos.castle_perm & Castling.BQSC:
+            if pos.pieces[Square.D8] == Pieces.EMPTY and pos.pieces[Square.C8] == Pieces.EMPTY and pos.pieces[Square.B8] == Pieces.EMPTY:
+                if not pos.is_sq_attacked(Square.E8, Side.WHITE) and not pos.is_sq_attacked(Square.D8, Side.WHITE):
+                    AddQuietMove(pos, MOVE(Square.E8, Square.C8, Pieces.EMPTY, Pieces.EMPTY, MFLAG_CA), move_list)
+    # 2. Loop through Sliding Pieces
     pce_idx = LoopSlideIndex[side]
     pce = LoopSlidePiece[pce_idx]
     
     while pce != 0:
         for i in range(pos.pce_num[pce]):
             sq = pos.p_list[pce][i]
-            # Actual sliding logic (e.g. Bishop rays) goes here in the next video
-            # print(f"Generating slider moves for {pce} at {sq}")
+            
+            for index in range(NumDir[pce]):
+                dir = PceDir[pce][index]
+                target_sq = sq + dir
+                
+                # Slide until offboard or blocked
+                while SqOnBoard(target_sq):
+                    target_pce = pos.pieces[target_sq]
+                    
+                    if target_pce != Pieces.EMPTY:
+                        # Capture enemy piece then stop sliding
+                        if PieceCol[target_pce] == (side ^ 1):
+                            AddCaptureMove(pos, MOVE(sq, target_sq, target_pce, Pieces.EMPTY, 0), move_list)
+                        break 
+                    
+                    # Empty square: add move and continue sliding
+                    AddQuietMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, 0), move_list)
+                    target_sq += dir
             
         pce_idx += 1
         pce = LoopSlidePiece[pce_idx]
 
-    # 3. Loop through Non-Sliding Pieces (Knights, Kings)
+    # 3. Loop through Non-Sliding Pieces
     pce_idx = LoopNonSlideIndex[side]
     pce = LoopNonSlidePiece[pce_idx]
     
     while pce != 0:
         for i in range(pos.pce_num[pce]):
             sq = pos.p_list[pce][i]
-            
-            # Loop through all possible directions for this piece type
             for index in range(NumDir[pce]):
                 dir = PceDir[pce][index]
                 target_sq = sq + dir
-                
-                if not SqOnBoard(target_sq):
-                    continue
+                if not SqOnBoard(target_sq): continue
                 
                 target_pce = pos.pieces[target_sq]
-                
                 if target_pce != Pieces.EMPTY:
-                    # If target square has an enemy piece, it's a capture
-                    # Use XOR with 1 to get the opposite color (White 0 ^ 1 = Black 1)
                     if PieceCol[target_pce] == (side ^ 1):
                         AddCaptureMove(pos, MOVE(sq, target_sq, target_pce, Pieces.EMPTY, 0), move_list)
                 else:
-                    # If target square is empty, it's a quiet move
                     AddQuietMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, 0), move_list)
-            
         pce_idx += 1
         pce = LoopNonSlidePiece[pce_idx]
-    
-
-
-

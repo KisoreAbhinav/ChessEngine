@@ -287,11 +287,11 @@ class Board:
 
         # Temporary arrays to match with the current board state
         t_pce_num = [0] * 13
-        t_big_pce = [0, 3]
-        t_maj_pce = [0, 3]
-        t_min_pce = [0, 3]
-        t_material = [0, 2]
-        
+        t_big_pce = [0] * 3  
+        t_maj_pce = [0] * 3  
+        t_min_pce = [0] * 3  
+        t_material = [0] * 3
+            
         # Temporary bitboards for pawns
         t_pawns = [0, 0, 0]
 
@@ -401,7 +401,7 @@ class Board:
             self.min_pce[i] = 0
             self.pawns[i] = 0 
 
-        self.material = [0, 0]
+        self.material = [0, 0, 0]
         
         for i in range(64):
             sq = Sq64to120[i]

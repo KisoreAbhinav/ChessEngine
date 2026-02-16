@@ -8,36 +8,57 @@ def main():
     AllInit()
     print("Hydra 1.0 Initialized")
 
-    board = Board()
-    move_list = MoveList()
-
-    # The specific FEN from Video 33
-    test_fen = "n1n5/PPPk4/8/8/8/8/4Kppp/5N1N w - - 0 1"
-    
-    print("\n--- TEST: Video 33 Non-Slider Pieces (Knights/Kings) ---")
-    board.parse_fen(test_fen)
-    
-    # Generate moves
-    GenerateAllMoves(board, move_list)
-    
-    print(f"Total Moves Generated: {move_list.count}")
-    
-    # To verify like the video, print the moves specifically for the pieces
-    for i in range(move_list.count):
-        move = move_list.moves[i].move
-        print(f"Move {i+1}: {PrMove(move)}")
 
 
 #--------------------------------------------------------------------------------------------------
 '''
+
     board = Board()
     move_list = MoveList()
 
-    # Mirror position from Part 31 (Black to move)
-    fen_part_31 = "rnbqkbnr/p1p1p3/3p3p/1p1p4/2P1PpP2/8/PP1P1PpP/RNBQKB1R b KQkq e3 0 1"
+    # The "Castle 2" Position (Video 36)
+    # This is a complex position designed to test all move generation logic.
+    castle_2_fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
     
-    print("\n--- TEST: Part 31 Black Pawn Moves ---")
-    board.parse_fen(fen_part_31)
+    print("\n--- TEST: Video 36 Final Verification (Castle 2) ---")
+    board.parse_fen(castle_2_fen)
+    board.print_board()
+    
+    GenerateAllMoves(board, move_list)
+    
+    print(f"Total Moves Generated: {move_list.count}")
+    
+    if move_list.count == 48:
+        print("SUCCESS: Exactly 48 moves found! Your engine matches the video.")
+    else:
+        print(f"FAILED: Expected 48 moves, but found {move_list.count}.")
+        print("Checking generated moves...")
+        # Optional: Print moves to debug if count is wrong
+        # for i in range(move_list.count):
+        #     print(f"{i+1}: {PrMove(move_list.moves[i].move)}")
+'''
+'''
+    board = Board()
+    move_list = MoveList()
+
+    # FEN for testing Sliders (Bishops and Rooks)
+    test_fen = "r6r/1p2k1p1/p4p1p/2n1p3/2p5/2P1PB2/PP3PPP/R4RK1 w - - 0 1"
+    
+    print("\n--- TEST: Video 34 Slider Pieces ---")
+    board.parse_fen(test_fen)
+    GenerateAllMoves(board, move_list)
+    
+    for i in range(move_list.count):
+        move = move_list.moves[i].move
+        print(f"Move {i+1}: {PrMove(move)}")
+'''
+'''
+    board = Board()
+    move_list = MoveList()
+
+    fen = "rnbqkbnr/p1p1p3/3p3p/1p1p4/2P1PpP2/8/PP1P1PpP/RNBQKB1R b KQkq e3 0 1"
+    
+    board.parse_fen(fen)
     GenerateAllMoves(board, move_list)
     
     print(f"Expected: 26 Moves | Result: {move_list.count} Moves")
@@ -50,10 +71,9 @@ def main():
     board = Board()
     move_list = MoveList()
 
-    fen_part_30 = "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNBQKBNR w KQkq e6 0 1"
+    fen = "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNBQKBNR w KQkq e6 0 1"
     
-    print("\n--- TEST: Part 30 White Pawn Moves ---")
-    board.parse_fen(fen_part_30)
+    board.parse_fen(fen)
     board.print_board()
     
     GenerateAllMoves(board, move_list)
@@ -230,7 +250,7 @@ enable the show attacked function to print the board too
     print(f"Position Hash Key: {board.pos_key:X}")
     assert board.pos_key != 0, "Error: Hash key was not generated"
 
-    # 6. Piece Count Verification (The Part 16 Logic)
+    # 6. Piece Count Verification 
     # White: 8 Pawns, 8 Big (K, Q, 2R, 2B, 2N), 4 Major (K, Q, 2R), 4 Minor (2B, 2N)
     print(f"White Pieces - Big: {board.big_pce[Side.WHITE]}, Maj: {board.maj_pce[Side.WHITE]}, Min: {board.min_pce[Side.WHITE]}")
     

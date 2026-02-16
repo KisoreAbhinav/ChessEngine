@@ -1,6 +1,5 @@
 # defs.py
 from enum import IntEnum
-import sys
 from validate import *
 
 
@@ -26,10 +25,6 @@ MAXDEPTH = 64
 
 ENGINE_NAME = "Hydra 1.0"
 # Name of the engine - can be anything but i am obsessed with Hydra so...
-
-# Runtime safety vs speed toggle.
-# Keep False for normal play/search speed.
-DEBUG_CHECK_BOARD = False
 
 
 BOARD_SQ_NUM = 120
@@ -555,12 +550,7 @@ class Board:
     
     def print_board(self):
         print("\nGame Board:")
-        enc = (sys.stdout.encoding or "").lower()
-        use_unicode = ("utf" in enc) or ("65001" in enc)
-        if use_unicode:
-            pce_char = ["·", "♙", "♘", "♗", "♖", "♕", "♔", "♟", "♞", "♝", "♜", "♛", "♚"]
-        else:
-            pce_char = ".PNBRQKpnbrqk"
+        pce_char = ".PNBRQKpnbrqk"
         side_char = "wb-"
         
         for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
@@ -610,53 +600,49 @@ class Board:
 
         assert SqOnBoard(sq)
         assert SideValid(side)
-        if DEBUG_CHECK_BOARD:
-            assert self.check_board()
-
-        pieces = self.pieces
-        piece_col = PieceCol
+        assert self.check_board()
 
         # pawns
         if side == Side.WHITE:
-            if pieces[sq - 11] == Pieces.wP or pieces[sq - 9] == Pieces.wP:
+            if self.pieces[sq - 11] == Pieces.wP or self.pieces[sq - 9] == Pieces.wP:
                 return True
         else:
-            if pieces[sq + 11] == Pieces.bP or pieces[sq + 9] == Pieces.bP:
+            if self.pieces[sq + 11] == Pieces.bP or self.pieces[sq + 9] == Pieces.bP:
                 return True
 
         # knights
         for direction in KnDir:
-            pce = pieces[sq + direction]
-            if pce != Square.NO_SQ and PceKnight[pce] and piece_col[pce] == side:
+            pce = self.pieces[sq + direction]
+            if pce != Square.NO_SQ and PceKnight[pce] and PieceCol[pce] == side:
                 return True
         
         for direction in RkDir:
             t_sq = sq + direction
-            pce = pieces[t_sq]
+            pce = self.pieces[t_sq]
             while pce != Square.NO_SQ: # While not offboard
                 if pce != Pieces.EMPTY:
-                    if PceRookQueen[pce] and piece_col[pce] == side:
+                    if PceRookQueen[pce] and PieceCol[pce] == side:
                         return True
                     break 
                 t_sq += direction
-                pce = pieces[t_sq]
+                pce = self.pieces[t_sq]
 
         # Bishops & Queens
         for direction in BiDir:
             t_sq = sq + direction
-            pce = pieces[t_sq]
+            pce = self.pieces[t_sq]
             while pce != Square.NO_SQ:
                 if pce != Pieces.EMPTY:
-                    if PceBishopQueen[pce] and piece_col[pce] == side:
+                    if PceBishopQueen[pce] and PieceCol[pce] == side:
                         return True
                     break
                 t_sq += direction
-                pce = pieces[t_sq]
+                pce = self.pieces[t_sq]
 
         # Kings
         for direction in KiDir:
-            pce = pieces[sq + direction]
-            if pce != Square.NO_SQ and PceKing[pce] and piece_col[pce] == side:
+            pce = self.pieces[sq + direction]
+            if pce != Square.NO_SQ and PceKing[pce] and PieceCol[pce] == side:
                 return True
 
         return False
@@ -766,3 +752,7 @@ def pop_bit(bb: int) -> tuple[int, int]:
     bb &= (bb - 1)
     
     return index, bb
+
+
+
+

@@ -30,33 +30,6 @@ def side_name(side):
     return "White" if side == Side.WHITE else "Black"
 
 
-def cp_to_white_win_pct(cp):
-    # Smooth centipawn -> win tendency mapping for display only.
-    x = max(-1200, min(1200, cp))
-    return 100.0 / (1.0 + math.exp(-x / 180.0))
-
-
-def print_eval_meter_from_white_cp(white_cp):
-    pct = cp_to_white_win_pct(white_cp)
-    width = 24
-    white_blocks = int(round((pct / 100.0) * width))
-    white_blocks = max(0, min(width, white_blocks))
-    bar = "#" * white_blocks + "." * (width - white_blocks)
-
-    if white_cp > 80:
-        tag = "White better"
-    elif white_cp < -80:
-        tag = "Black better"
-    else:
-        tag = "Roughly equal"
-
-    print(f"Eval meter |W {pct:5.1f}%| [{bar}] {tag}")
-
-
-def result_white_cp(result, side_to_move):
-    return result["best_score"] if side_to_move == Side.WHITE else -result["best_score"]
-
-
 class Personality:
     def __init__(self, playstyle=50, tenacity=50, accuracy=50, temperament=50, endgames=50):
         self.playstyle = max(0, min(100, int(playstyle)))
@@ -288,13 +261,12 @@ def choose_humanized_move(board, depth, movetime_ms, personality):
     return chosen, meta
 
 
-def print_search_result(result, side_to_move):
+def print_search_result(result):
     pv_text = " ".join(result["pv"]) if result["pv"] else "(none)"
     if result.get("book"):
         print("Source: Opening book")
     print(f"Best move: {result['best_move_str']}")
     print(f"Eval (cp): {result['best_score']}")
-    print_eval_meter_from_white_cp(result_white_cp(result, side_to_move))
     print(f"Depth reached: {result['completed_depth']}")
     print(f"Nodes: {result['nodes']}")
     print(f"Best line (PV): {pv_text}")
@@ -313,7 +285,7 @@ def analyze_best_move_only():
 
     result = run_search(board, depth, movetime_ms, verbose=False)
     print("\nSearch result")
-    print_search_result(result, board.side)
+    print_search_result(result)
 
 
 def play_game_vs_engine():
@@ -363,7 +335,6 @@ def play_game_vs_engine():
                 f"Engine plays: {PrMove(best_move)} "
                 f"(score {result['best_score']}, depth {result['completed_depth']})"
             )
-            print_eval_meter_from_white_cp(result_white_cp(result, board.side))
             MakeMove(board, best_move)
 
 
@@ -416,8 +387,6 @@ def play_game_vs_humanized_bot():
             msg += f" | ref: {PrMove(meta['best_move'])} ({meta['best_score']}cp)"
             msg += f" | acc: {meta['effective_accuracy']}"
             print(msg)
-            white_cp = meta["best_score"] if board.side == Side.WHITE else -meta["best_score"]
-            print_eval_meter_from_white_cp(white_cp)
 
             MakeMove(board, move)
 
@@ -438,7 +407,7 @@ def evaluate_position_and_line():
     print("Searching for best sequence...")
     result = run_search(board, depth, movetime_ms, verbose=False)
     print("\nEvaluation + best sequence")
-    print_search_result(result, board.side)
+    print_search_result(result)
 
 
 def main():

@@ -1,14 +1,12 @@
 from defs import (
     Side,
     Pieces,
-    Square,
     MAX_GAME_MOVES,
     MAXDEPTH,
     PieceVal,
     FROMSQ,
     TOSQ,
     CAPTURED,
-    PROMOTED,
     MFLAG_EP,
     SearchInfo,
 )
@@ -23,13 +21,6 @@ INF = 30000
 MATE = 29000
 MAX_PLY = MAXDEPTH
 
-TT_EXACT = 0
-TT_ALPHA = 1
-TT_BETA = 2
-TT_MAX_ENTRIES = 250_000
-TT = {}
-DELTA_MARGIN = 200
-
 
 def _eval_for_side_to_move(board):
     return EvalPosition(board)
@@ -37,56 +28,6 @@ def _eval_for_side_to_move(board):
 
 def _is_capture_move(move):
     return CAPTURED(move) != Pieces.EMPTY or (move & MFLAG_EP)
-
-
-def _has_non_pawn_material(board):
-    if board.side == Side.WHITE:
-        return (
-            board.pce_num[Pieces.wN]
-            + board.pce_num[Pieces.wB]
-            + board.pce_num[Pieces.wR]
-            + board.pce_num[Pieces.wQ]
-        ) > 0
-    return (
-        board.pce_num[Pieces.bN]
-        + board.pce_num[Pieces.bB]
-        + board.pce_num[Pieces.bR]
-        + board.pce_num[Pieces.bQ]
-    ) > 0
-
-
-def _make_null_move(board):
-    from hashkeys import PieceKeys, SideKey
-
-    board.history[board.his_ply].pos_key = board.pos_key
-    board.history[board.his_ply].move = 0
-    board.history[board.his_ply].fifty_move = board.fifty_move
-    board.history[board.his_ply].en_passant = board.en_passant
-    board.history[board.his_ply].castle_perm = board.castle_perm
-
-    if board.en_passant != Square.NO_SQ:
-        board.pos_key ^= PieceKeys[Pieces.EMPTY][board.en_passant]
-
-    board.en_passant = Square.NO_SQ
-    board.side ^= 1
-    board.pos_key ^= SideKey
-
-    board.his_ply += 1
-    board.ply += 1
-
-
-def _take_null_move(board):
-    from hashkeys import SideKey
-
-    board.his_ply -= 1
-    board.ply -= 1
-    board.side ^= 1
-    board.pos_key ^= SideKey
-
-    board.castle_perm = board.history[board.his_ply].castle_perm
-    board.fifty_move = board.history[board.his_ply].fifty_move
-    board.en_passant = board.history[board.his_ply].en_passant
-    board.pos_key = board.history[board.his_ply].pos_key
 
 
 def CheckUp(info):
@@ -132,14 +73,6 @@ def _order_moves(board, move_list, ply, pv_move):
         base_score = move_list.moves[i].score
         move_list.moves[i].score = _score_move(board, move, ply, pv_move, base_score)
 
-
-def _sort_move_list(move_list):
-    if move_list.count > 1:
-        move_list.moves[: move_list.count] = sorted(
-            move_list.moves[: move_list.count], key=lambda m: m.score, reverse=True
-        )
-
-
 def PickNextMove(move_num, move_list):
     best_num = move_num
     best_score = 0
@@ -154,44 +87,8 @@ def PickNextMove(move_num, move_list):
     move_list.moves[best_num] = temp
 
 
-def _tt_get_entry(pos_key):
-    return TT.get(pos_key)
-
-
-def _tt_probe(pos_key, depth, alpha, beta):
-    entry = TT.get(pos_key)
-    if entry is None:
-        return None, 0
-
-    move = entry["move"]
-    if entry["depth"] < depth:
-        return None, move
-
-    score = entry["score"]
-    flag = entry["flag"]
-    if flag == TT_EXACT:
-        return score, move
-    if flag == TT_ALPHA and score <= alpha:
-        return score, move
-    if flag == TT_BETA and score >= beta:
-        return score, move
-    return None, move
-
-
-def _tt_store(pos_key, depth, score, flag, move):
-    if len(TT) >= TT_MAX_ENTRIES:
-        TT.clear()
-    TT[pos_key] = {
-        "depth": depth,
-        "score": score,
-        "flag": flag,
-        "move": move,
-    }
-
-
 def ClearForSearch(board, info):
     ClearPvTable(board.pv_table)
-    TT.clear()
     for i in range(2):
         for j in range(MAX_PLY):
             board.search_killers[i][j] = 0
@@ -289,47 +186,19 @@ def Quiescence(alpha, beta, board, info):
     if board.ply >= MAX_PLY - 1:
         return EvalPosition(board)
 
-    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
-
-    # Standing pat is only valid if side-to-move is not in check.
-    stand_pat = -INF
-    if not in_check:
-        stand_pat = EvalPosition(board)
-        if stand_pat >= beta:
-            return beta
-        if stand_pat > alpha:
-            alpha = stand_pat
-
-        # Delta pruning: if even optimistic capture gain cannot reach alpha,
-        # skip quiescence expansion at this node.
-        if stand_pat + PieceVal[Pieces.wQ] + DELTA_MARGIN < alpha:
-            return alpha
+    # Standing pat
+    score = EvalPosition(board)
+    if score >= beta:
+        return beta
+    if score > alpha:
+        alpha = score
 
     move_list = MoveList()
-    if in_check:
-        # If in check, search legal evasions (all moves), not captures only.
-        GenerateAllMoves(board, move_list)
-    else:
-        GenerateAllCaps(board, move_list)
-    _sort_move_list(move_list)
+    GenerateAllCaps(board, move_list)
 
     for move_num in range(move_list.count):
+        PickNextMove(move_num, move_list)
         move = move_list.moves[move_num].move
-
-        # Capture-delta pruning (not while in check):
-        # if this capture/promotion can't improve alpha, skip it.
-        if not in_check:
-            captured = CAPTURED(move)
-            promo = PROMOTED(move)
-            if captured == Pieces.EMPTY and promo == Pieces.EMPTY:
-                continue
-            gain = 0
-            if captured != Pieces.EMPTY:
-                gain += PieceVal[captured]
-            if promo != Pieces.EMPTY:
-                gain += PieceVal[promo]
-            if stand_pat + gain + DELTA_MARGIN < alpha:
-                continue
 
         if not MakeMove(board, move):
             continue
@@ -359,6 +228,10 @@ def AlphaBeta(alpha, beta, depth, board, info, do_null=1, ply=0):
     if info.stopped:
         return 0
 
+    # Base case: switch to quiescence search to resolve tactical captures.
+    if depth == 0:
+        return Quiescence(alpha, beta, board, info)
+
     info.nodes += 1
 
     # Draw detection via repetition / 50-move rule.
@@ -368,81 +241,24 @@ def AlphaBeta(alpha, beta, depth, board, info, do_null=1, ply=0):
     if ply >= MAX_PLY - 1:
         return _eval_for_side_to_move(board)
 
-    # Check extension: search one ply deeper when side-to-move is in check.
-    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
-    if in_check:
-        depth += 1
-
-    # Base case: switch to quiescence search to resolve tactical captures.
-    if depth == 0:
-        return Quiescence(alpha, beta, board, info)
-
-    alpha_orig = alpha
-    tt_score, tt_move = _tt_probe(board.pos_key, depth, alpha, beta)
-    if tt_score is not None:
-        return tt_score
-
-    # Null Move Pruning: strong speed/strength optimization in quiet nodes.
-    if (
-        do_null
-        and depth >= 3
-        and ply > 0
-        and not in_check
-        and _has_non_pawn_material(board)
-    ):
-        R = 2 + (depth // 4)
-        _make_null_move(board)
-        score = -AlphaBeta(-beta, -beta + 1, depth - 1 - R, board, info, 0, ply + 1)
-        _take_null_move(board)
-
-        if info.stopped:
-            return 0
-        if score >= beta:
-            _tt_store(board.pos_key, depth, beta, TT_BETA, 0)
-            return beta
-
     move_list = MoveList()
     GenerateAllMoves(board, move_list)
 
-    pv_move = tt_move if tt_move != 0 else ProbePvTable(board)
+    pv_move = ProbePvTable(board)
     _order_moves(board, move_list, ply, pv_move)
-    _sort_move_list(move_list)
 
     legal_moves = 0
     old_alpha = alpha
     best_move = 0
 
     for move_num in range(move_list.count):
+        PickNextMove(move_num, move_list)
         move = move_list.moves[move_num].move
         if not MakeMove(board, move):
             continue
 
         legal_moves += 1
-        # PVS + conservative LMR:
-        # late quiet moves are searched at reduced depth first, then re-searched if needed.
-        is_capture = _is_capture_move(move)
-        next_depth = depth - 1
-
-        if legal_moves == 1:
-            score = -AlphaBeta(-beta, -alpha, next_depth, board, info, do_null, ply + 1)
-        else:
-            reduced = False
-            if (
-                next_depth >= 3
-                and legal_moves > 3
-                and not in_check
-                and not is_capture
-            ):
-                reduced = True
-                score = -AlphaBeta(-alpha - 1, -alpha, next_depth - 1, board, info, do_null, ply + 1)
-            else:
-                score = -AlphaBeta(-alpha - 1, -alpha, next_depth, board, info, do_null, ply + 1)
-
-            if score > alpha:
-                if reduced:
-                    score = -AlphaBeta(-alpha - 1, -alpha, next_depth, board, info, do_null, ply + 1)
-                if score > alpha and score < beta:
-                    score = -AlphaBeta(-beta, -alpha, next_depth, board, info, do_null, ply + 1)
+        score = -AlphaBeta(-beta, -alpha, depth - 1, board, info, do_null, ply + 1)
         TakeMove(board)
 
         if info.stopped:
@@ -457,7 +273,6 @@ def AlphaBeta(alpha, beta, depth, board, info, do_null=1, ply=0):
                 if not _is_capture_move(move):
                     board.search_killers[1][ply] = board.search_killers[0][ply]
                     board.search_killers[0][ply] = move
-                _tt_store(board.pos_key, depth, beta, TT_BETA, move)
                 return beta
 
             alpha = score
@@ -471,12 +286,6 @@ def AlphaBeta(alpha, beta, depth, board, info, do_null=1, ply=0):
         if in_check:
             return -MATE + ply
         return 0
-
-    tt_flag = TT_EXACT
-    if alpha <= alpha_orig:
-        tt_flag = TT_ALPHA
-
-    _tt_store(board.pos_key, depth, alpha, tt_flag, best_move)
 
     if alpha != old_alpha and best_move != 0:
         StorePvMove(board, best_move)
@@ -587,18 +396,7 @@ def IterativeDeepening(board, max_depth, time_limit_ms=0, stdin_enabled=True, ve
     completed_depth = 0
 
     for depth in range(1, max_depth + 1):
-        if depth == 1:
-            score = AlphaBeta(-INF, INF, depth, board, info, 1, 0)
-        else:
-            window = 50
-            alpha = max(-INF, best_score - window)
-            beta = min(INF, best_score + window)
-            score = AlphaBeta(alpha, beta, depth, board, info, 1, 0)
-            while not info.stopped and (score <= alpha or score >= beta):
-                window *= 2
-                alpha = max(-INF, best_score - window)
-                beta = min(INF, best_score + window)
-                score = AlphaBeta(alpha, beta, depth, board, info, 1, 0)
+        score = AlphaBeta(-INF, INF, depth, board, info, 1, 0)
         if info.stopped:
             break
 
@@ -645,18 +443,7 @@ def SearchPosition(board, info):
     best_pv = []
 
     for current_depth in range(1, max_depth + 1):
-        if current_depth == 1:
-            best_score = AlphaBeta(-INF, INF, current_depth, board, info, 1, 0)
-        else:
-            window = 50
-            alpha = max(-INF, best_score - window)
-            beta = min(INF, best_score + window)
-            best_score = AlphaBeta(alpha, beta, current_depth, board, info, 1, 0)
-            while not info.stopped and (best_score <= alpha or best_score >= beta):
-                window *= 2
-                alpha = max(-INF, best_score - window)
-                beta = min(INF, best_score + window)
-                best_score = AlphaBeta(alpha, beta, current_depth, board, info, 1, 0)
+        best_score = AlphaBeta(-INF, INF, current_depth, board, info, 1, 0)
         if info.stopped:
             break
 

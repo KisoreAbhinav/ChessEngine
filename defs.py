@@ -366,13 +366,16 @@ class Board:
         for i in range(13):
             self.pce_num[i] = 0
             
-        for i in range(3):
+        for i in range(2):
             self.big_pce[i] = 0
             self.maj_pce[i] = 0
             self.min_pce[i] = 0
-            self.pawns[i] = 0
             self.material[i] = 0
         # Reset all the pieces and counts
+
+        for i in range (3):
+            self.pawns[i] = 0
+
             
         for i in range(13):
             for j in range(10):

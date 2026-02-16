@@ -3,6 +3,24 @@ from defs import *
 
 MAX_POS_MOVES = 256
 
+
+# The '0' at the end of each sequence acts as a terminator for the while loop
+LoopSlidePiece = [ 
+    Pieces.wB, Pieces.wR, Pieces.wQ, 0, 
+    Pieces.bB, Pieces.bR, Pieces.bQ, 0 
+]
+
+LoopNonSlidePiece = [ 
+    Pieces.wN, Pieces.wK, 0, 
+    Pieces.bN, Pieces.bK, 0 
+]
+
+# These tell the engine where to start looking in the arrays above 
+# based on the side: [WHITE (0), BLACK (1)]
+LoopSlideIndex = [ 0, 4 ]
+LoopNonSlideIndex = [ 0, 3 ]
+
+
 class MoveList:
     def __init__(self):
         self.moves = [Move() for _ in range(MAX_POS_MOVES)]
@@ -63,7 +81,6 @@ def AddBlackPawnMove(board, from_sq, to_sq, move_list):
     else:
         AddQuietMove(board, MOVE(from_sq, to_sq, Pieces.EMPTY, Pieces.EMPTY, 0), move_list)
 
-
 def generate_white_pawn_moves(pos, move_list):
     # Loop through all white pawns using the piece list (p_list)
     for pce_num in range(pos.pce_num[Pieces.wP]):
@@ -97,10 +114,10 @@ def generate_black_pawn_moves(pos, move_list):
     for pce_num in range(pos.pce_num[Pieces.bP]):
         sq = pos.p_list[Pieces.bP][pce_num]
         
-        # 1. Forward Moves (-10)
+        # 1. Forward Move (-10)
         if pos.pieces[sq - 10] == Pieces.EMPTY:
             AddBlackPawnMove(pos, sq, sq - 10, move_list)
-            # Double Push from Rank 7
+            # Double Push from Rank 7 (Black starts on Rank 7)
             if RanksBoard[sq] == Ranks.RANK_7 and pos.pieces[sq - 20] == Pieces.EMPTY:
                 AddQuietMove(pos, MOVE(sq, sq - 20, Pieces.EMPTY, Pieces.EMPTY, PAWN_START_FLAG), move_list)
         
@@ -119,12 +136,60 @@ def generate_black_pawn_moves(pos, move_list):
                 if target_sq == pos.en_passant:
                     AddEnPassantMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, EP_FLAG), move_list)
 
+
 def GenerateAllMoves(pos, move_list):
     move_list.count = 0
-    
-    if pos.side == Side.WHITE:
+    side = pos.side
+
+    # 1. Handle Pawns (Keep these separate as they are unique)
+    if side == Side.WHITE:
         generate_white_pawn_moves(pos, move_list)
     else:
         generate_black_pawn_moves(pos, move_list)
+
+    # 2. Loop through Sliding Pieces (Bishops, Rooks, Queens)
+    pce_idx = LoopSlideIndex[side]
+    pce = LoopSlidePiece[pce_idx]
+    
+    while pce != 0:
+        for i in range(pos.pce_num[pce]):
+            sq = pos.p_list[pce][i]
+            # Actual sliding logic (e.g. Bishop rays) goes here in the next video
+            # print(f"Generating slider moves for {pce} at {sq}")
+            
+        pce_idx += 1
+        pce = LoopSlidePiece[pce_idx]
+
+    # 3. Loop through Non-Sliding Pieces (Knights, Kings)
+    pce_idx = LoopNonSlideIndex[side]
+    pce = LoopNonSlidePiece[pce_idx]
+    
+    while pce != 0:
+        for i in range(pos.pce_num[pce]):
+            sq = pos.p_list[pce][i]
+            
+            # Loop through all possible directions for this piece type
+            for index in range(NumDir[pce]):
+                dir = PceDir[pce][index]
+                target_sq = sq + dir
+                
+                if not SqOnBoard(target_sq):
+                    continue
+                
+                target_pce = pos.pieces[target_sq]
+                
+                if target_pce != Pieces.EMPTY:
+                    # If target square has an enemy piece, it's a capture
+                    # Use XOR with 1 to get the opposite color (White 0 ^ 1 = Black 1)
+                    if PieceCol[target_pce] == (side ^ 1):
+                        AddCaptureMove(pos, MOVE(sq, target_sq, target_pce, Pieces.EMPTY, 0), move_list)
+                else:
+                    # If target square is empty, it's a quiet move
+                    AddQuietMove(pos, MOVE(sq, target_sq, Pieces.EMPTY, Pieces.EMPTY, 0), move_list)
+            
+        pce_idx += 1
+        pce = LoopNonSlidePiece[pce_idx]
+    
+
 
 

@@ -8,10 +8,43 @@ def main():
     AllInit()
     print("Hydra 1.0 Initialized")
 
+    board = Board()
+    move_list = MoveList()
 
+    # The specific FEN from Video 33
+    test_fen = "n1n5/PPPk4/8/8/8/8/4Kppp/5N1N w - - 0 1"
+    
+    print("\n--- TEST: Video 33 Non-Slider Pieces (Knights/Kings) ---")
+    board.parse_fen(test_fen)
+    
+    # Generate moves
+    GenerateAllMoves(board, move_list)
+    
+    print(f"Total Moves Generated: {move_list.count}")
+    
+    # To verify like the video, print the moves specifically for the pieces
+    for i in range(move_list.count):
+        move = move_list.moves[i].move
+        print(f"Move {i+1}: {PrMove(move)}")
 
 
 #--------------------------------------------------------------------------------------------------
+'''
+    board = Board()
+    move_list = MoveList()
+
+    # Mirror position from Part 31 (Black to move)
+    fen_part_31 = "rnbqkbnr/p1p1p3/3p3p/1p1p4/2P1PpP2/8/PP1P1PpP/RNBQKB1R b KQkq e3 0 1"
+    
+    print("\n--- TEST: Part 31 Black Pawn Moves ---")
+    board.parse_fen(fen_part_31)
+    GenerateAllMoves(board, move_list)
+    
+    print(f"Expected: 26 Moves | Result: {move_list.count} Moves")
+    
+    for i in range(move_list.count):
+        print(f"{i+1}: {PrMove(move_list.moves[i].move)}")
+'''
 
 '''----------------MOVE GEN AND COUNT TEST(HATE THIS PART, TOOK 2 HOURS OMG)-----------
     board = Board()

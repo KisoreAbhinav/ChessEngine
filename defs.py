@@ -8,7 +8,7 @@ def AllInit():
     from hashkeys import init_hash_keys
     init_hash_keys()
 
-    
+
 U64 = int
 # arbitrary precision
 # instead of using unsigned long long int in C, we just define it, as python handles it
@@ -188,7 +188,27 @@ MFLAG_CA = 0x1000000       # Castling
 MFLAG_CAP = 0x7C000        # Includes EP and Captured bits
 MFLAG_PRO = 0xF00000       # Any Promotion
 
+# Number of directions for each piece: [EMPTY, wP, wN, wB, wR, wQ, wK, bP, bN, bB, bR, bQ, bK]
+NumDir = [ 0, 0, 8, 4, 4, 8, 8, 0, 8, 4, 4, 8, 8 ]
 
+# Direction offsets for each piece type
+PceDir = [
+    [0, 0, 0, 0, 0, 0, 0, 0], # EMPTY
+    [0, 0, 0, 0, 0, 0, 0, 0], # wP (handled separately)
+    [-8, -19, -21, -12, 8, 19, 21, 12], # wN (Knight)
+    [-9, -11, 11, 9, 0, 0, 0, 0], # wB
+    [-1, -10, 1, 10, 0, 0, 0, 0], # wR
+    [-1, -10, 1, 10, -9, -11, 11, 9], # wQ
+    [-1, -10, 1, 10, -9, -11, 11, 9], # wK
+    [0, 0, 0, 0, 0, 0, 0, 0], # bP (handled separately)
+    [-8, -19, -21, -12, 8, 19, 21, 12], # bN
+    [-9, -11, 11, 9, 0, 0, 0, 0], # bB
+    [-1, -10, 1, 10, 0, 0, 0, 0], # bR
+    [-1, -10, 1, 10, -9, -11, 11, 9], # bQ
+    [-1, -10, 1, 10, -9, -11, 11, 9]  # bK
+]
+
+PieceSlider = [ False, False, False, True, True, True, False, False, False, True, True, True, False ]
 #--------------------------------------------------------------------------------------------------
 # Board Constants/Conditions
 #--------------------------------------------------------------------------------------------------
@@ -257,7 +277,7 @@ class Board:
         # At any given instance, the maximum number of piece of any type can be 10
         # Example - 2 rooks and all pawns promoted to rooks so 2 + 8 = 10
 
-        self.material = [0,0]
+        self.material = [0,0,0]
         # White and Black's material Score
 
 
@@ -351,6 +371,7 @@ class Board:
             self.maj_pce[i] = 0
             self.min_pce[i] = 0
             self.pawns[i] = 0
+            self.material[i] = 0
         # Reset all the pieces and counts
             
         for i in range(13):

@@ -1,4 +1,5 @@
 # hydra.py
+from move_gen import *
 from defs import *
 from move_io import *
 
@@ -9,7 +10,29 @@ def main():
 
 
 
+
 #--------------------------------------------------------------------------------------------------
+
+'''----------------MOVE GEN AND COUNT TEST(HATE THIS PART, TOOK 2 HOURS OMG)-----------
+    board = Board()
+    move_list = MoveList()
+
+    fen_part_30 = "rnbqkb1r/pp1p1pPp/8/2p1pP2/1P1P4/3P3P/P1P1P3/RNBQKBNR w KQkq e6 0 1"
+    
+    print("\n--- TEST: Part 30 White Pawn Moves ---")
+    board.parse_fen(fen_part_30)
+    board.print_board()
+    
+    GenerateAllMoves(board, move_list)
+    
+    print(f"Test Expected: 26 Moves")
+    print(f"Test Result:   {move_list.count} Moves")
+    
+    print("\nMove List:")
+    for i in range(move_list.count):
+        move = move_list.moves[i].move
+        print(f"{i+1}: {PrMove(move)}")
+'''
 
 '''--------------PRINT MOVE AND SQUARES TEST-----------------------------
     m = MOVE(31, 51, Pieces.EMPTY, Pieces.EMPTY, PAWN_START_FLAG)

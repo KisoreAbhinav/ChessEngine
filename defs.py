@@ -2,6 +2,13 @@
 from enum import IntEnum
 from validate import *
 
+
+def AllInit():
+    init_sq120tosq64()
+    from hashkeys import init_hash_keys
+    init_hash_keys()
+
+    
 U64 = int
 # arbitrary precision
 # instead of using unsigned long long int in C, we just define it, as python handles it
@@ -671,7 +678,4 @@ def pop_bit(bb: int) -> tuple[int, int]:
 
 
 
-def AllInit():
-    init_sq120tosq64()
-    from hashkeys import init_hash_keys
-    init_hash_keys()
+

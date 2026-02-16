@@ -4,6 +4,26 @@ from defs import *
 def main():
     AllInit()
 
+
+'''
+------------------------TEST RESET BOARD--------------------------
+    board = Board()
+    
+    # Manually mess up the board to test the reset
+    board.side = Side.BLACK
+    board.pieces[Square.E2] = Pieces.wP
+    
+    # Perform the reset
+    board.reset_board()
+    
+    print(f"Engine: {ENGINE_NAME}")
+    print(f"Board Side after reset (should be 2): {board.side}")
+    print(f"Square E2 after reset (should be 0): {board.pieces[Square.E2]}")
+'''
+
+"""
+-------------------------TEST BITBOARD------------------------------
+
     play_bitboard = 0
     
     # Adding a pawn to D2
@@ -31,6 +51,7 @@ def main():
         print(f"{Sq64to120[index]:5}", end="")
     
     print()
+"""
 
 if __name__ == "__main__":
     main()

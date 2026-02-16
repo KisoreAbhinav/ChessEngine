@@ -1,3 +1,4 @@
+# defs.py
 from enum import IntEnum
 
 U64 = int
@@ -206,15 +207,56 @@ class Board:
     def check_board(self):
 
         temp_pce_num = [0] * 13
-        for t_pce in [Pieces.W_PAWN, Pieces.W_KNIGHT, Pieces.W_BISHOP, 
-                     Pieces.W_ROOK, Pieces.W_QUEEN, Pieces.W_KING,
-                     Pieces.B_PAWN, Pieces.B_KNIGHT, Pieces.B_BISHOP, 
-                     Pieces.B_ROOK, Pieces.B_QUEEN, Pieces.B_KING]:
+        for t_pce in [Pieces.wP, Pieces.wN, Pieces.wB, 
+                     Pieces.wR, Pieces.wQ, Pieces.wK,
+                     Pieces.bP, Pieces.bN, Pieces.bB, 
+                     Pieces.bR, Pieces.bQ, Pieces.bK]:
            
            for j in range(self.pce_num[t_pce]):
                sq = self.p_list[t_pce][j]
-               # ASSERT: The piece at this square in the piece list must match the board
+
                assert self.pieces[sq] == t_pce, f"Piece List mismatch at {sq}"
+
+
+
+    def reset_board(self):
+
+        for i in range(BOARD_SQ_NUM):
+            self.pieces[i] = Square.NO_SQ 
+            # setting all of the squares to OFFBOARD
+            
+        for i in range(64):
+            self.pieces[Sq64to120[i]] = Pieces.EMPTY
+            # setting the playable squares to empty from OFFBOARD
+            # 21 to 98
+            
+       
+        for i in range(13):
+            self.pce_num[i] = 0
+            
+        for i in range(3):
+            self.big_pce[i] = 0
+            self.maj_pce[i] = 0
+            self.min_pce[i] = 0
+            self.pawns[i] = 0
+        # Reset all the pieces and counts
+            
+        for i in range(13):
+            for j in range(10):
+                self.p_list[i][j] = Square.NO_SQ
+                #clearing the piece list [type of piece and max of 10 pieces]
+                
+        # 5. Reset Kings and Game State
+        self.king_sq = [Square.NO_SQ, Square.NO_SQ]
+        self.side = Side.BOTH 
+        # Setting to BOTH as a "null" state
+        # hence when the board is set, if the side is still NULL, an illegal postion can be called using the checkboard function
+        self.en_passant = Square.NO_SQ
+        self.fifty_move = 0
+        self.ply = 0
+        self.his_ply = 0
+        self.castle_perm = 0
+        self.pos_key = 0
 
 # Class Board stores the board's attributes, lets say, its the opening, what pieces have moved, in what order, what pieces have been traded, etc etc 
 # Stores basically a screenshot of a board at a current position
@@ -253,8 +295,6 @@ def init_sq120tosq64():
 
             sq64 += 1
 
-def AllInit():
-    init_sq120tosq64()
 
 
 
@@ -282,17 +322,18 @@ def print_bitboard(bitboard: int):
 
 
 BIT_TABLE = [
-    63, 30, 3, 32, 25, 41, 22, 33, 15, 50, 42, 13, 11, 53, 19, 34,
-    52, 31, 2, 31, 24, 40, 21, 45, 10, 18, 47, 1, 54, 9, 57, 0,
-    35, 62, 4, 26, 60, 6, 23, 44, 46, 27, 56, 16, 7, 39, 48, 24,
-    59, 58, 20, 37, 17, 36, 8
+  0, 1, 48,  2, 57, 49, 28,  3,
+  61, 58, 50, 42, 38, 29, 17,  4,
+  62, 54, 59, 36, 51, 47, 43, 25,
+  41, 22, 39, 32, 30, 13, 18,  5,
+  63, 47, 55, 44, 60, 37, 52, 26,
+  46, 24, 40, 33, 31, 14, 19,  6,
+  56, 45, 53, 27, 46, 23, 34, 15,
+  20,  7, 21, 35, 16,  8,  9, 10
 ]
 
 def count_bits(b: int) -> int:
-    """
-    Brian Kernighan's Algorithm as shown in the image.
-    Counts the number of set bits (1s) in a 64-bit integer.
-    """
+
     r = 0
     while b:
         b &= (b - 1) # This clears the least significant bit
@@ -300,15 +341,10 @@ def count_bits(b: int) -> int:
     return r
 
 def pop_bit(bb: int) -> tuple[int, int]:
-    """
-    Identifies the square index of the first bit and removes it.
-    Returns (index, updated_bitboard).
-    """
+
     if bb == 0:
         return -1, 0
-    
-    # Mirroring the De Bruijn sequence/folding logic from the image
-    # We can also use Python's built-in bit_length() for cleaner LSB detection:
+
     b = bb ^ (bb - 1)
     fold = ( (b & 0xffffffff) ^ (b >> 32) ) & 0xffffffff
     
@@ -319,3 +355,11 @@ def pop_bit(bb: int) -> tuple[int, int]:
     bb &= (bb - 1)
     
     return index, bb
+
+
+
+def AllInit():
+    init_sq120tosq64()
+    from hashkeys import init_hash_keys
+    init_sq120tosq64()
+    init_hash_keys

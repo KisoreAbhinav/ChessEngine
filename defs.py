@@ -119,7 +119,10 @@ class Undo:
 # fifty_move -> stores the counter of the 50 move rule; reset by every pawn push or piece captures
 # pos_key -> the Zobrist hash key that of the attributes of the board of the previous move
     
-
+class Move:
+    def __init__(self):
+        self.move = 0   # The 32-bit integer that will hold all move info
+        self.score = 0  # An integer used for move ordering (sorting)
 
 #--------------------------------------------------------------------------------------------------
 # Look Up Tables
@@ -137,6 +140,46 @@ def FR2SQ(f, r):
 def Sq120(sq120):
     return Sq120to64[sq120]
 
+
+KnDir = [-8, -19, -21, -12, 8, 19, 21, 12]
+RkDir = [-1, -10, 1, 10]
+BiDir = [-9, -11, 11, 9]
+KiDir = [-1, -10, 1, 10, -9, -11, 11, 9]
+
+PceKnight = [False, False, True, False, False, False, False, False, True, False, False, False, False]
+PceKing = [False, False, False, False, False, False, True, False, False, False, False, False, True]
+PceRookQueen = [False, False, False, False, True, True, False, False, False, False, True, True, False]
+PceBishopQueen = [False, False, False, True, False, True, False, False, False, True, False, True, False]
+
+
+FROMSQ_MASK     = 0x7F        # 7 bits
+TOSQ_MASK       = 0x7F << 7   # 7 bits shifted
+CAPTURED_MASK   = 0xF << 14   # 4 bits shifted
+EP_FLAG         = 0x40000     # bit 18 (1 << 18)
+PAWN_START_FLAG = 0x80000     # bit 19 (1 << 19)
+PROMOTED_MASK   = 0xF << 20   # 4 bits shifted
+CASTLE_FLAG     = 0x1000000   # bit 24 (1 << 24)
+
+# Unpacking functions
+def FROMSQ(m):     return (m & 0x7F)
+def TOSQ(m):       return ((m >> 7) & 0x7F)
+def CAPTURED(m):   return ((m >> 14) & 0xF)
+def PROMOTED(m):   return ((m >> 20) & 0xF)
+
+# Packing function
+def MOVE(f, t, ca, pro, fl):    return (f) | (t << 7) | (ca << 14) | (pro << 20) | (fl)
+
+# Flag Constants
+MFLAG_EP = 0x40000         # En Passant
+MFLAG_PS = 0x80000         # Pawn Start
+MFLAG_CA = 0x1000000       # Castling
+
+# Special Check Masks
+# These allow us to quickly check if ANY capture or ANY promotion happened
+MFLAG_CAP = 0x7C000        # Includes EP and Captured bits
+MFLAG_PRO = 0xF00000       # Any Promotion
+
+
 #--------------------------------------------------------------------------------------------------
 # Board Constants/Conditions
 #--------------------------------------------------------------------------------------------------
@@ -144,7 +187,8 @@ class Board:
     __slots__ = ("pieces", "pawns", "king_sq", "side", 
                  "en_passant", "fifty_move", "ply", 
                  "his_ply", "pos_key", "pce_num", "big_pce", 
-                 "maj_pce", "min_pce", "castle_perm", "history", "p_list")
+                 "maj_pce", "min_pce", "castle_perm", "history", "p_list",
+                 "material")
 
     def __init__(self):
         self.pieces = [Pieces.EMPTY] * BOARD_SQ_NUM 
@@ -204,9 +248,26 @@ class Board:
         # At any given instance, the maximum number of piece of any type can be 10
         # Example - 2 rooks and all pawns promoted to rooks so 2 + 8 = 10
 
+        self.material = [0,0]
+        # White and Black's material Score
+
+
     def check_board(self):
 
         temp_pce_num = [0] * 13
+
+        # Temporary arrays to match with the current board state
+        t_pce_num = [0] * 13
+        t_big_pce = [0, 3]
+        t_maj_pce = [0, 3]
+        t_min_pce = [0, 3]
+        t_material = [0, 2]
+        
+        # Temporary bitboards for pawns
+        t_pawns = [0, 0, 0]
+
+
+
         for t_pce in [Pieces.wP, Pieces.wN, Pieces.wB, 
                      Pieces.wR, Pieces.wQ, Pieces.wK,
                      Pieces.bP, Pieces.bN, Pieces.bB, 
@@ -217,6 +278,48 @@ class Board:
 
                assert self.pieces[sq] == t_pce, f"Piece List mismatch at {sq}"
 
+
+        for i in range(64):
+            sq120 = Sq64to120[i]
+            pce = self.pieces[sq120]
+            if pce != Pieces.EMPTY:
+                col = PieceCol[pce]
+                
+                t_pce_num[pce] += 1
+                if PieceBig[pce]: t_big_pce[col] += 1
+                if PieceMaj[pce]: t_maj_pce[col] += 1
+                if PieceMin[pce]: t_min_pce[col] += 1
+                t_material[col] += PieceVal[pce]
+                
+                # pawn bitboards for comparison
+                if pce == Pieces.wP:
+                    t_pawns[Side.WHITE] |= (1 << i)
+                    t_pawns[Side.BOTH] |= (1 << i)
+                elif pce == Pieces.bP:
+                    t_pawns[Side.BLACK] |= (1 << i)
+                    t_pawns[Side.BOTH] |= (1 << i)
+
+        # Compare temporary results with the actual Board state
+        for pce_type in range(Pieces.wP, Pieces.bK + 1):
+            assert t_pce_num[pce_type] == self.pce_num[pce_type], f"Count mismatch for piece {pce_type}"
+
+        assert t_material[Side.WHITE] == self.material[Side.WHITE], "White material mismatch"
+        assert t_material[Side.BLACK] == self.material[Side.BLACK], "Black material mismatch"
+        
+        assert t_pawns[Side.WHITE] == self.pawns[Side.WHITE], "White pawn bitboard mismatch"
+        assert t_pawns[Side.BLACK] == self.pawns[Side.BLACK], "Black pawn bitboard mismatch"
+        assert t_pawns[Side.BOTH] == self.pawns[Side.BOTH], "Combined pawn bitboard mismatch"
+
+        # verify the Hash Key 
+        from hashkeys import generate_pos_key
+        assert generate_pos_key(self) == self.pos_key, "PosKey mismatch - engine state is corrupted"
+
+        # Side and King positions
+        assert self.side in [Side.WHITE, Side.BLACK]
+        assert self.pieces[self.king_sq[Side.WHITE]] == Pieces.wK
+        assert self.pieces[self.king_sq[Side.BLACK]] == Pieces.bK
+
+        return True
 
 
     def reset_board(self):
@@ -268,27 +371,35 @@ class Board:
             self.min_pce[i] = 0
             self.pawns[i] = 0 
 
+        self.material = [0, 0]
+        
         for i in range(64):
             sq = Sq64to120[i]
             pce = self.pieces[sq]
             if pce != Pieces.EMPTY:
                 col = PieceCol[pce]
                 
-                # Use the helper arrays to increment counts
+                if col != Side.BOTH:
+                    self.material[col] += PieceVal[pce]
+
+                # helper arrays to increment counts
                 if PieceBig[pce]: self.big_pce[col] += 1
                 if PieceMaj[pce]: self.maj_pce[col] += 1
                 if PieceMin[pce]: self.min_pce[col] += 1
                 
+                #updates the pawn bitboards
                 if pce == Pieces.wP:
                     self.pawns[Side.WHITE] |= (1 << i)
                     self.pawns[Side.BOTH] |= (1 << i)
                 elif pce == Pieces.bP:
                     self.pawns[Side.BLACK] |= (1 << i)
                     self.pawns[Side.BOTH] |= (1 << i)
-                
+
+                # Update Piece List: self.p_list[piece_type][index_of_that_piece] = square
                 self.p_list[pce][self.pce_num[pce]] = sq
                 self.pce_num[pce] += 1
                 
+                #Tracks kings
                 if pce == Pieces.wK: self.king_sq[Side.WHITE] = sq
                 if pce == Pieces.bK: self.king_sq[Side.BLACK] = sq
 
@@ -350,24 +461,101 @@ class Board:
         from hashkeys import generate_pos_key
         self.pos_key = generate_pos_key(self)
 
+    
     def print_board(self):
         print("\nGame Board:")
         pce_char = ".PNBRQKpnbrqk"
+        side_char = "wb-"
         
         for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
-            line = f"{rank + 1}  "
+            line = f"{rank + 1}  " # Print rank number
             for file in range(File.FILE_1, File.FILE_8 + 1):
                 sq = FR2SQ(file, rank)
                 pce = self.pieces[sq]
-                line += f"{pce_char[pce]} "
+
+                line += f"{pce_char[pce]:>3}" 
             print(line)
             
-        print("   a b c d e f g h")
-        print(f"Side: {'white' if self.side == Side.WHITE else 'black'}")
-        print(f"EnPassant: {self.en_passant}")
-        print(f"Castle: {self.castle_perm:x}")
+        print("\n     a  b  c  d  e  f  g  h")
+        
+        print(f"Side: {side_char[self.side]}")
+        print(f"EnPassant: {self.en_passant}") # Printed as decimal (99 = No Sq)
+        
+        # Castling Logic: Check bits and print letter or dash
+        c = self.castle_perm
+        ksc = 'K' if c & Castling.WKSC else '-'
+        qsc = 'Q' if c & Castling.WQSC else '-'
+        bksc = 'k' if c & Castling.BKSC else '-'
+        bqsc = 'q' if c & Castling.BQSC else '-'
+        print(f"Castle: {ksc}{qsc}{bksc}{bqsc}")
+        
         print(f"PosKey: {self.pos_key:X}")
 
+    # def print_board(self):
+    #     print("\nGame Board:")
+    #     pce_char = ".PNBRQKpnbrqk"
+        
+    #     for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
+    #         line = f"{rank + 1}  "
+    #         for file in range(File.FILE_1, File.FILE_8 + 1):
+    #             sq = FR2SQ(file, rank)
+    #             pce = self.pieces[sq]
+    #             line += f"{pce_char[pce]} "
+    #         print(line)
+            
+    #     print("   a b c d e f g h")
+    #     print(f"Side: {'white' if self.side == Side.WHITE else 'black'}")
+    #     print(f"EnPassant: {self.en_passant}")
+    #     print(f"Castle: {self.castle_perm:x}")
+    #     print(f"PosKey: {self.pos_key:X}")
+
+
+    def is_sq_attacked(self, sq, side):
+        # pawns
+        if side == Side.WHITE:
+            if self.pieces[sq - 11] == Pieces.wP or self.pieces[sq - 9] == Pieces.wP:
+                return True
+        else:
+            if self.pieces[sq + 11] == Pieces.bP or self.pieces[sq + 9] == Pieces.bP:
+                return True
+
+        # knights
+        for direction in KnDir:
+            pce = self.pieces[sq + direction]
+            if pce != Square.NO_SQ and PceKnight[pce] and PieceCol[pce] == side:
+                return True
+        
+        for direction in RkDir:
+            t_sq = sq + direction
+            pce = self.pieces[t_sq]
+            while pce != Square.NO_SQ: # While not offboard
+                if pce != Pieces.EMPTY:
+                    if PceRookQueen[pce] and PieceCol[pce] == side:
+                        return True
+                    break 
+                t_sq += direction
+                pce = self.pieces[t_sq]
+
+        # Bishops & Queens
+        for direction in BiDir:
+            t_sq = sq + direction
+            pce = self.pieces[t_sq]
+            while pce != Square.NO_SQ:
+                if pce != Pieces.EMPTY:
+                    if PceBishopQueen[pce] and PieceCol[pce] == side:
+                        return True
+                    break
+                t_sq += direction
+                pce = self.pieces[t_sq]
+
+        # Kings
+        for direction in KiDir:
+            pce = self.pieces[sq + direction]
+            if pce != Square.NO_SQ and PceKing[pce] and PieceCol[pce] == side:
+                return True
+
+        return False
+    
 # Class Board stores the board's attributes, lets say, its the opening, what pieces have moved, in what order, what pieces have been traded, etc etc 
 # Stores basically a screenshot of a board at a current position
 
@@ -479,5 +667,4 @@ def pop_bit(bb: int) -> tuple[int, int]:
 def AllInit():
     init_sq120tosq64()
     from hashkeys import init_hash_keys
-    init_sq120tosq64()
     init_hash_keys()

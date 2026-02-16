@@ -23,22 +23,22 @@ def generate_pos_key(board):
 
     final_key = 0
     
-    # 1. Pieces on squares
+    # Pieces on squares
     for sq in range(BOARD_SQ_NUM):
         piece = board.pieces[sq]
         if piece != 99: # Not NO_SQ or EMPTY
             final_key ^= PieceKeys[piece][sq]
             
-    # 2. Side to move
+    # Side to move
     if board.side == 0: # WHITE
         final_key ^= SideKey
         
-    # 3. En Passant
+    # En Passant
     if board.en_passant != 99: # NO_SQ
         # We use EMPTY piece key to hash the EP square
         final_key ^= PieceKeys[0][board.en_passant]
         
-    # 4. Castling
+    # Castling
     final_key ^= CastleKeys[board.castle_perm]
     
     return final_key

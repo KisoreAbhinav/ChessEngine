@@ -1,11 +1,117 @@
 # hydra.py
 from defs import *
+from move_io import *
 
 def main():
     print("Initializing Hydra 1.0")
     AllInit()
     print("Hydra 1.0 Initialized")
 
+
+
+#--------------------------------------------------------------------------------------------------
+
+'''--------------PRINT MOVE AND SQUARES TEST-----------------------------
+    m = MOVE(31, 51, Pieces.EMPTY, Pieces.EMPTY, PAWN_START_FLAG)
+    
+    print(f"From Square 31: {PrSq(31)}")
+    print(f"Full Move String: {PrMove(m)}")
+    
+    # Simulate a Promotion: a7 to a8 promoting to a Queen
+    promo_move = MOVE(81, 91, Pieces.EMPTY, Pieces.wQ, 0)
+    print(f"Promotion Move: {PrMove(promo_move)}")
+'''
+
+'''------------------------MOVE FORMAT AND BITS TEST--------------------
+    from_sq = 22
+    to_sq = 42
+    captured = Pieces.bN # 8
+    promoted = Pieces.wQ # 5
+    flags = PAWN_START_FLAG
+    
+    # Pack the move
+    my_move = MOVE(from_sq, to_sq, captured, promoted, flags)
+    
+    # Unpack and Print
+    print(f"Test Move Integer: {my_move}")
+    print(f"Unpacked From: {FROMSQ(my_move)}")
+    print(f"Unpacked To: {TOSQ(my_move)}")
+    print(f"Unpacked Captured Piece: {CAPTURED(my_move)}")
+    print(f"Unpacked Promoted Piece: {PROMOTED(my_move)}")
+    
+    # 3. Check Flags
+    if my_move & PAWN_START_FLAG:
+        print("Flag Check: This is a Pawn Start!")
+'''
+
+'''-------------- ATTACKED SQUARES VISUALIZATION------------------------
+enable the show attacked function to print the board too
+    board = Board()
+
+    # 3. Set up a specific test position
+    # White Queen on e4, White Knight on g3, Black Pawn on d5
+    test_fen = "8/8/8/3p4/4Q3/6N1/8/8 w - - 0 1"
+    board.parse_fen(test_fen)
+    
+    print("Current Board State:")
+    board.print_board()
+
+    # 4. Run the Attack Tests
+    show_attacked_squares(board, Side.WHITE)
+    show_attacked_squares(board, Side.BLACK)
+'''
+
+
+''' --------------- Forcing an error for Check Board Function--------
+    board = Board()
+
+    board.parse_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+
+    print("--- Testing Board Integrity ---")
+
+    # 2. This should pass quietly
+    if board.check_board():
+        print("Initial Board: OK")
+
+    # 3. FORCE A FAIL: Manually corrupt the material count
+    print("\nCorrupting material count...")
+    board.material[Side.WHITE] -= 100 
+
+    try:
+        board.check_board()
+    except AssertionError as e:
+        print(f"Caught Expected Error: {e}")
+
+    # 4. FORCE A FAIL: Corrupt the Hash Key
+    print("\nCorrupting Position Key...")
+    board.pos_key ^= 123456789 # Flip some bits in the hash
+
+    try:
+        board.check_board()
+    except AssertionError as e:
+        print(f"Caught Expected Error: {e}")
+'''
+
+'''--------------------TEST NEW BOARD PRINT FUNCTION--------------------
+    board = Board()
+    FEN1 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+    FEN2 = "rnbqkbnr/pp1ppppp/8/2p1P3/8/8/PPPP1PPP/RNBQKBNR b KQkq d6 0 2"
+    FEN3 = "rnbqkbnr/pp1ppppp/8/2p1P3/5N2/8/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
+    #wiki positions to check and verify the working
+    print("--- Testing FEN 1 (After 1. e4) ---")
+    board.parse_fen(FEN1)
+    board.print_board()
+    # Expected: Side b, EP 45 (E3), Castle KQkq
+
+    print("\n--- Testing FEN 2 (After 1. e4 c5 2. e5) ---")
+    board.parse_fen(FEN2)
+    board.print_board()
+    # Expected: Side b, EP 73 (D6), Castle KQkq
+
+    print("\n--- Testing FEN 3 (After 1. e4 c5 2. e5 Nf3) ---")
+    board.parse_fen(FEN3)
+    board.print_board()
+'''
 
 '''-------------- TEST FEN ALL CASES-----------------------------------
     board = Board()
@@ -134,5 +240,22 @@ def main():
     print()
 """
 
+
 if __name__ == "__main__":
     main()
+
+
+# def show_attacked_squares(board, side):
+#     print(f"\nSquares Attacked by {'White' if side == Side.WHITE else 'Black'}:")
+#     # We loop from Rank 8 down to Rank 1
+#     for rank in range(Ranks.RANK_8, Ranks.RANK_1 - 1, -1):
+#         line = f"{rank + 1}  "
+#         for file in range(File.FILE_1, File.FILE_8 + 1):
+#             sq = FR2SQ(file, rank)
+#             # Call the method we added to the Board class
+#             if board.is_sq_attacked(sq, side):
+#                 line += "X "
+#             else:
+#                 line += ". "
+#         print(line)
+#     print("   a b c d e f g h")

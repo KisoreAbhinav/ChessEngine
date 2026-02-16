@@ -1,8 +1,9 @@
 import sys
 
 from defs import AllInit, Board, ENGINE_NAME, MAXDEPTH, SearchInfo, Side
+from book import get_book_move, load_opening_book
 from misc import GetTimeMs
-from move_io import NOMOVE, ParseMove
+from move_io import NOMOVE, ParseMove, PrMove
 from make_mov import MakeMove
 from search import SearchPosition
 
@@ -48,6 +49,11 @@ def ParsePosition(line, board):
 
 
 def ParseGo(line, info, board):
+    book_move = get_book_move(board)
+    if book_move != NOMOVE:
+        print(f"bestmove {PrMove(book_move)}")
+        return {"best_move": book_move, "book": True}
+
     tokens = line.strip().split()
 
     depth = -1
@@ -176,6 +182,7 @@ def _dispatch_uci_command(line, board, info):
 def UciLoop():
     _configure_stdio()
     AllInit()
+    load_opening_book("openings.txt")
     board = Board()
     board.parse_fen(INITIAL_FEN)
     info = SearchInfo()

@@ -1,5 +1,6 @@
 from defs import AllInit, Board, Side
 from evaluate import EvalPosition
+from book import get_book_move, load_opening_book
 from make_mov import MakeMove, TakeMove
 from move_gen import GenerateAllMoves, MoveList
 from move_io import ParseMove, PrMove
@@ -7,6 +8,7 @@ from search import IterativeDeepening
 
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+BOOK_ENABLED = True
 
 
 def ask_int(prompt, default_value, min_value=1):
@@ -59,6 +61,22 @@ def print_game_state_if_terminal(board):
 
 
 def run_search(board, depth, movetime_ms, verbose=False):
+    if BOOK_ENABLED:
+        book_move = get_book_move(board)
+        if book_move != 0:
+            return {
+                "best_move": book_move,
+                "best_move_str": PrMove(book_move),
+                "best_score": EvalPosition(board),
+                "completed_depth": 0,
+                "nodes": 0,
+                "cutoffs": 0,
+                "first_cutoffs": 0,
+                "stopped": 0,
+                "quit": 0,
+                "pv": [PrMove(book_move)],
+                "book": True,
+            }
     return IterativeDeepening(
         board,
         max_depth=depth,
@@ -70,6 +88,8 @@ def run_search(board, depth, movetime_ms, verbose=False):
 
 def print_search_result(result):
     pv_text = " ".join(result["pv"]) if result["pv"] else "(none)"
+    if result.get("book"):
+        print("Source: Opening book")
     print(f"Best move: {result['best_move_str']}")
     print(f"Eval (cp): {result['best_score']}")
     print(f"Depth reached: {result['completed_depth']}")
@@ -163,15 +183,20 @@ def evaluate_position_and_line():
 
 
 def main():
+    global BOOK_ENABLED
+
     print("Initializing Hydra 1.0")
     AllInit()
+    load_opening_book("openings.txt")
 
     while True:
         print("\n----------Hydra Terminal Menu---------------")
+        print(f"Opening Book: {'ON' if BOOK_ENABLED else 'OFF'}")
         print("1) Find the best move in a position (FEN)")
         print("2) Play against the Hydra 1.0 (choose White/Black)")
         print("3) Load position, evaluate, and show best continuation")
-        print("4) Exit")
+        print("4) Toggle opening book ON/OFF")
+        print("5) Exit")
         choice = input("> ").strip()
 
         if choice == "1":
@@ -181,6 +206,9 @@ def main():
         elif choice == "3":
             evaluate_position_and_line()
         elif choice == "4":
+            BOOK_ENABLED = not BOOK_ENABLED
+            print(f"Opening book is now {'ON' if BOOK_ENABLED else 'OFF'}.")
+        elif choice == "5":
             print("Thank You For Using Hydra 1.0.")
             break
         else:

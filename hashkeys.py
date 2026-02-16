@@ -1,5 +1,5 @@
 import random
-from defs import BOARD_SQ_NUM
+from defs import *
 
 # Arrays to hold random numbers
 PieceKeys = [[0 for _ in range(BOARD_SQ_NUM)] for _ in range(13)]
@@ -19,26 +19,28 @@ def init_hash_keys():
     for i in range(16):
         CastleKeys[i] = random.getrandbits(64)
 
-def generate_pos_key(board):
 
+def generate_pos_key(board):
+    """Return the Zobrist hash for the given board object."""
     final_key = 0
-    
+
     # Pieces on squares
     for sq in range(BOARD_SQ_NUM):
         piece = board.pieces[sq]
-        if piece != 99: # Not NO_SQ or EMPTY
+        if piece != Square.NO_SQ and piece != Pieces.EMPTY:
+            # Piece is an IntEnum value that indexes PieceKeys
             final_key ^= PieceKeys[piece][sq]
-            
-    # Side to move
-    if board.side == 0: # WHITE
+
+    # Side to move: XOR SideKey only if BLACK to move
+    # (Side.BLACK == 1, Side.WHITE == 0)
+    if board.side == Side.BLACK:
         final_key ^= SideKey
-        
-    # En Passant
-    if board.en_passant != 99: # NO_SQ
-        # We use EMPTY piece key to hash the EP square
-        final_key ^= PieceKeys[0][board.en_passant]
-        
-    # Castling
+
+    # En Passant: use the EMPTY row's key for the EP square itself
+    if board.en_passant != Square.NO_SQ:
+        final_key ^= PieceKeys[Pieces.EMPTY][board.en_passant]
+
+    # Castling permissions
     final_key ^= CastleKeys[board.castle_perm]
-    
+
     return final_key

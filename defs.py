@@ -98,7 +98,7 @@ class Square(IntEnum):
     NO_SQ = 99
 # defining the entire board of operation
 # NO_SQ is used for calculations of stuff like out of board, en-passant etc
-
+NO_SQ = Square.NO_SQ
 
 class Castling(IntEnum):
     WKSC = 1
@@ -346,8 +346,10 @@ class Board:
 
         # verify the Hash Key 
         from hashkeys import generate_pos_key
-        assert generate_pos_key(self) == self.pos_key, "PosKey mismatch - engine state is corrupted"
-
+        calc = generate_pos_key(self)
+        if calc != self.pos_key:
+            print(f"DEBUG PosKey mismatch!\n  computed: {calc:016X}\n  stored:   {self.pos_key:016X}\n  side: {self.side} (0=WHITE,1=BLACK)\n  en_passant: {self.en_passant}\n  castle_perm: {self.castle_perm}")
+            raise AssertionError("PosKey mismatch - engine state is corrupted")
         # Side and King positions
         assert self.side in [Side.WHITE, Side.BLACK]
         assert self.pieces[self.king_sq[Side.WHITE]] == Pieces.wK

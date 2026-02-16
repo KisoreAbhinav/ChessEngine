@@ -26,7 +26,7 @@ def generate_pos_key(board):
     # 1. Pieces on squares
     for sq in range(BOARD_SQ_NUM):
         piece = board.pieces[sq]
-        if piece != 99 and piece != 0: # Not NO_SQ or EMPTY
+        if piece != 99: # Not NO_SQ or EMPTY
             final_key ^= PieceKeys[piece][sq]
             
     # 2. Side to move

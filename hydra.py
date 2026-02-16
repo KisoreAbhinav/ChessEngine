@@ -2,7 +2,45 @@
 from defs import *
 
 def main():
+    print("Initializing Hydra 1.0")
     AllInit()
+    print("Hydra 1.0 Initialized")
+
+
+'''-------------- TEST FEN ALL CASES-----------------------------------
+    board = Board()
+    
+    # Test 1: Standard Start
+    print("Test 1: Starting Position")
+    board.parse_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    assert board.side == Side.WHITE
+    assert board.pce_num[Pieces.wP] == 8
+    print("[PASS]")
+
+    # Test 2: Mid-game with En Passant and Black to move
+    # This FEN has a pawn on e5, and an en passant target on d6
+    print("\nTest 2: Mid-game + En Passant")
+    board.parse_fen("rnbqkbnr/pp1ppppp/8/2p1P3/8/8/PPPP1PPP/RNBQKBNR b KQkq d6 0 3")
+    assert board.side == Side.BLACK
+    assert board.en_passant == Square.D6
+    # Square D6 is rank 6, file 4 (0-indexed) -> FR2SQ(3, 5)
+    print(f"En Passant Square: {board.en_passant} (D6)")
+    print("[PASS]")
+
+    # Test 3: Endgame (Few pieces, no castling)
+    print("\nTest 3: Endgame (No Castling)")
+    board.parse_fen("8/k7/8/8/8/8/7P/K7 w - - 0 1")
+    board.print_board()
+    assert board.castle_perm == 0
+    assert board.pce_num[Pieces.wK] == 1
+    assert board.pce_num[Pieces.bK] == 1
+    assert board.big_pce[Side.WHITE] == 1 # Just the King
+    print("[PASS]")
+
+    print("\n[ALL FEN TESTS PASSED]")
+'''
+
+
 '''------------------------------TEST FEN PARSING--------------------------
     board = Board()
     

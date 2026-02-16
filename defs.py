@@ -1,5 +1,6 @@
 # defs.py
 from enum import IntEnum
+from validate import *
 
 U64 = int
 # arbitrary precision
@@ -123,6 +124,7 @@ class Move:
     def __init__(self):
         self.move = 0   # The 32-bit integer that will hold all move info
         self.score = 0  # An integer used for move ordering (sorting)
+
 
 #--------------------------------------------------------------------------------------------------
 # Look Up Tables
@@ -511,6 +513,11 @@ class Board:
 
 
     def is_sq_attacked(self, sq, side):
+
+        assert SqOnBoard(sq)
+        assert SideValid(side)
+        assert self.check_board()
+
         # pawns
         if side == Side.WHITE:
             if self.pieces[sq - 11] == Pieces.wP or self.pieces[sq - 9] == Pieces.wP:

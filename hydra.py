@@ -1,12 +1,27 @@
-from defs import AllInit, Board, Side
+from defs import (
+    AllInit,
+    Board,
+    Side,
+    Pieces,
+    FROMSQ,
+    TOSQ,
+    CAPTURED,
+    PROMOTED,
+    MFLAG_CA,
+    MFLAG_EP,
+    FilesBoard,
+    RanksBoard,
+)
 from evaluate import EvalPosition
 from book import get_book_move, load_opening_book
 from make_mov import MakeMove, TakeMove
 from move_gen import GenerateAllMoves, MoveList
 from move_io import ParseMove, PrMove
 from search import IterativeDeepening
+from persona_trace import choose_trace_personality_move, infer_target_elo
 import math
-import random
+import os
+from datetime import datetime
 
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -58,27 +73,349 @@ def result_white_cp(result, side_to_move):
 
 
 class Personality:
-    def __init__(self, playstyle=50, tenacity=50, accuracy=50, temperament=50, endgames=50):
+    def __init__(
+        self,
+        playstyle=50,
+        tenacity=50,
+        accuracy=50,
+        temperament=50,
+        endgames=50,
+        target_elo=0,
+        adaptive_mode=False,
+    ):
         self.playstyle = max(0, min(100, int(playstyle)))
         self.tenacity = max(0, min(100, int(tenacity)))
         self.accuracy = max(0, min(100, int(accuracy)))
         self.temperament = max(0, min(100, int(temperament)))
         self.endgames = max(0, min(100, int(endgames)))
+        self.target_elo = max(0, min(2600, int(target_elo)))
+        self.adaptive_mode = bool(adaptive_mode)
 
 
 def ask_percent(prompt, default_value=50):
     return ask_int(prompt, default_value, 0)
 
 
+def ask_elo(prompt, default_value=1600):
+    value = ask_int(prompt, default_value, 400)
+    return max(400, min(2600, value))
+
+
+def ask_yes_no(prompt, default_yes=True):
+    default_tag = "Y/n" if default_yes else "y/N"
+    raw = input(f"{prompt} [{default_tag}]: ").strip().lower()
+    if not raw:
+        return default_yes
+    return raw in ("y", "yes", "1", "true")
+
+
+class AdaptiveEloTracker:
+    def __init__(self, start_elo=2600, min_elo=700, max_elo=2600):
+        self.start_elo = int(start_elo)
+        self.current_elo = int(start_elo)
+        self.min_elo = int(min_elo)
+        self.max_elo = int(max_elo)
+        self.loss_window = []
+        self.blunder_window = []
+        self.avg_loss = 0.0
+        self.blunder_rate = 0.0
+        self.sample_count = 0
+
+    def update_from_cp_loss(self, cp_loss):
+        cp_loss = max(0.0, float(cp_loss))
+        self.sample_count += 1
+
+        self.loss_window.append(cp_loss)
+        if len(self.loss_window) > 12:
+            self.loss_window.pop(0)
+
+        blunder = 1.0 if cp_loss >= 180.0 else 0.0
+        self.blunder_window.append(blunder)
+        if len(self.blunder_window) > 8:
+            self.blunder_window.pop(0)
+
+        self.avg_loss = sum(self.loss_window) / max(1, len(self.loss_window))
+        self.blunder_rate = sum(self.blunder_window) / max(1, len(self.blunder_window))
+
+        target = self.max_elo - int((3.0 * self.avg_loss) + (380.0 * self.blunder_rate))
+        target = max(self.min_elo, min(self.max_elo, target))
+        if self.avg_loss <= 25.0 and self.blunder_rate == 0.0:
+            target = min(self.max_elo, max(target, self.current_elo + 25))
+
+        smoothed = int(round((0.72 * self.current_elo) + (0.28 * target)))
+        self.current_elo = max(self.min_elo, min(self.max_elo, smoothed))
+        return self.current_elo
+
+
+def estimate_bot_elo(depth, movetime_ms):
+    if depth <= 1:
+        base = 700
+    elif depth == 2:
+        base = 850
+    elif depth == 3:
+        base = 1050
+    elif depth == 4:
+        base = 1250
+    elif depth == 5:
+        base = 1450
+    elif depth == 6:
+        base = 1650
+    elif depth == 7:
+        base = 1820
+    elif depth == 8:
+        base = 1980
+    elif depth == 9:
+        base = 2100
+    elif depth == 10:
+        base = 2200
+    else:
+        base = 2200 + min(180, (depth - 10) * 30)
+
+    if movetime_ms <= 0:
+        time_bonus = 0
+    elif movetime_ms <= 500:
+        time_bonus = 20
+    elif movetime_ms <= 1500:
+        time_bonus = 60
+    elif movetime_ms <= 3000:
+        time_bonus = 100
+    elif movetime_ms <= 5000:
+        time_bonus = 140
+    elif movetime_ms <= 10000:
+        time_bonus = 180
+    else:
+        time_bonus = 220
+
+    return max(700, min(2450, base + time_bonus))
+
+
+def _sq_to_alg(sq):
+    return f"{chr(ord('a') + FilesBoard[sq])}{RanksBoard[sq] + 1}"
+
+
+def _piece_letter(piece):
+    if piece in (Pieces.wN, Pieces.bN):
+        return "N"
+    if piece in (Pieces.wB, Pieces.bB):
+        return "B"
+    if piece in (Pieces.wR, Pieces.bR):
+        return "R"
+    if piece in (Pieces.wQ, Pieces.bQ):
+        return "Q"
+    if piece in (Pieces.wK, Pieces.bK):
+        return "K"
+    return ""
+
+
+def _promotion_letter(piece):
+    if piece in (Pieces.wN, Pieces.bN):
+        return "N"
+    if piece in (Pieces.wB, Pieces.bB):
+        return "B"
+    if piece in (Pieces.wR, Pieces.bR):
+        return "R"
+    return "Q"
+
+
+def _move_disambiguation(board, move, piece):
+    from_sq = FROMSQ(move)
+    to_sq = TOSQ(move)
+    conflicts = []
+    move_list = MoveList()
+    GenerateAllMoves(board, move_list)
+    for i in range(move_list.count):
+        other = move_list.moves[i].move
+        if other == move:
+            continue
+        if TOSQ(other) != to_sq:
+            continue
+        if board.pieces[FROMSQ(other)] != piece:
+            continue
+        if MakeMove(board, other):
+            TakeMove(board)
+            conflicts.append(FROMSQ(other))
+
+    if not conflicts:
+        return ""
+
+    from_file = FilesBoard[from_sq]
+    from_rank = RanksBoard[from_sq]
+    same_file = any(FilesBoard[sq] == from_file for sq in conflicts)
+    same_rank = any(RanksBoard[sq] == from_rank for sq in conflicts)
+
+    if not same_file:
+        return chr(ord("a") + from_file)
+    if not same_rank:
+        return str(from_rank + 1)
+    return f"{chr(ord('a') + from_file)}{from_rank + 1}"
+
+
+def move_to_san(board, move):
+    from_sq = FROMSQ(move)
+    to_sq = TOSQ(move)
+    piece = board.pieces[from_sq]
+    capture = CAPTURED(move) != Pieces.EMPTY or (move & MFLAG_EP) != 0
+
+    if move & MFLAG_CA:
+        san = "O-O" if FilesBoard[to_sq] > FilesBoard[from_sq] else "O-O-O"
+    else:
+        dst = _sq_to_alg(to_sq)
+        if piece in (Pieces.wP, Pieces.bP):
+            if capture:
+                san = f"{chr(ord('a') + FilesBoard[from_sq])}x{dst}"
+            else:
+                san = dst
+        else:
+            san = _piece_letter(piece)
+            san += _move_disambiguation(board, move, piece)
+            if capture:
+                san += "x"
+            san += dst
+
+        promoted = PROMOTED(move)
+        if promoted != Pieces.EMPTY:
+            san += f"={_promotion_letter(promoted)}"
+
+    if not MakeMove(board, move):
+        return PrMove(move)
+
+    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
+    if in_check:
+        legal = count_legal_moves(board)
+        san += "#" if legal == 0 else "+"
+
+    TakeMove(board)
+    return san
+
+
+class GameRecorder:
+    def __init__(self, start_fen, white_name, black_name):
+        self.start_fen = start_fen
+        self.white_name = white_name
+        self.black_name = black_name
+        self.moves_uci = []
+        self.moves_san = []
+
+    def add_move(self, board, move):
+        self.moves_uci.append(PrMove(move))
+        self.moves_san.append(move_to_san(board, move))
+
+    def save(self, result, reason=""):
+        os.makedirs("games", exist_ok=True)
+        ts = datetime.now()
+        date_tag = ts.strftime("%Y.%m.%d")
+        fname = ts.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join("games", f"hydra_game_{fname}.pgn")
+
+        tags = [
+            '[Event "Hydra Terminal Game"]',
+            '[Site "Local"]',
+            f'[Date "{date_tag}"]',
+            '[Round "-"]',
+            f'[White "{self.white_name}"]',
+            f'[Black "{self.black_name}"]',
+            f'[Result "{result}"]',
+        ]
+        if self.start_fen != START_FEN:
+            tags.append('[SetUp "1"]')
+            tags.append(f'[FEN "{self.start_fen}"]')
+
+        move_tokens = []
+        for idx, san in enumerate(self.moves_san):
+            if idx % 2 == 0:
+                move_tokens.append(f"{(idx // 2) + 1}.")
+            move_tokens.append(san)
+        move_tokens.append(result)
+        movetext = " ".join(move_tokens)
+
+        uci_line = " ".join(self.moves_uci)
+        reason_line = f"\n{{Reason: {reason}}}\n" if reason else "\n"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(tags))
+            f.write("\n\n")
+            f.write(movetext)
+            f.write(reason_line)
+            f.write(f"{{UCI: {uci_line}}}\n")
+
+        return path
+
+
+def terminal_result(board):
+    legal = count_legal_moves(board)
+    if legal > 0:
+        return None, None
+    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
+    if in_check:
+        if board.side == Side.WHITE:
+            return "0-1", "checkmate"
+        return "1-0", "checkmate"
+    return "1/2-1/2", "stalemate"
+
+
+def classify_move_quality(cp_loss):
+    if cp_loss <= 20:
+        return "excellent"
+    if cp_loss <= 60:
+        return "good"
+    if cp_loss <= 120:
+        return "inaccuracy"
+    if cp_loss <= 220:
+        return "mistake"
+    return "blunder"
+
+
+def assess_player_move(board, move, depth, movetime_ms):
+    analysis_depth = max(2, min(depth, 4))
+    analysis_time = 0 if movetime_ms == 0 else min(movetime_ms, 1200)
+
+    reference = run_search(board, analysis_depth, analysis_time, verbose=False)
+    best_cp = reference.get("best_score", EvalPosition(board))
+    ref_move = reference.get("best_move", 0)
+
+    if not MakeMove(board, move):
+        return None
+    move_cp = -EvalPosition(board)
+    gives_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
+    TakeMove(board)
+
+    cp_loss = max(0.0, float(best_cp) - float(move_cp))
+    return {
+        "cp_loss": cp_loss,
+        "best_cp": int(best_cp),
+        "move_cp": int(move_cp),
+        "quality": classify_move_quality(cp_loss),
+        "gives_check": bool(gives_check),
+        "ref_move": ref_move,
+    }
+
+
 def configure_personality():
     print("\n=== Humanized Bot Personality ===")
-    print("Use values from 0 to 100.")
-    print("playstyle   : foundational -> explosive")
-    print("tenacity    : fragile -> resilient")
-    print("accuracy    : low -> excellent")
-    print("temperament : conservative -> reckless")
-    print("endgames    : casual -> precise")
-    print("---------------------------------")
+    adaptive_mode = ask_yes_no("Enable adaptive mode (auto strength adapts to your play)?", True)
+    if adaptive_mode:
+        p = Personality(
+            playstyle=52,
+            tenacity=62,
+            accuracy=82,
+            temperament=42,
+            endgames=72,
+            target_elo=0,
+            adaptive_mode=True,
+        )
+        print("\nAdaptive personality loaded:")
+        print("- Mode: Adaptive")
+        print("- Elo target: Auto (estimated from settings + adaptation)")
+        print("- Sliders: Auto")
+        return p
+    else:
+        print("Use values from 0 to 100.")
+        print("playstyle   : foundational -> explosive")
+        print("tenacity    : fragile -> resilient")
+        print("accuracy    : low -> excellent")
+        print("temperament : conservative -> reckless")
+        print("endgames    : casual -> precise")
+        print("---------------------------------")
+        target_elo = ask_elo("Target Elo (400-2600)", 1600)
 
     p = Personality(
         playstyle=ask_percent("Playstyle", 50),
@@ -86,6 +423,8 @@ def configure_personality():
         accuracy=ask_percent("Accuracy", 65),
         temperament=ask_percent("Temperament", 45),
         endgames=ask_percent("Endgames", 60),
+        target_elo=target_elo,
+        adaptive_mode=adaptive_mode,
     )
     print("\nPersonality loaded:")
     print(f"- Playstyle: {p.playstyle}")
@@ -93,6 +432,8 @@ def configure_personality():
     print(f"- Accuracy: {p.accuracy}")
     print(f"- Temperament: {p.temperament}")
     print(f"- Endgames: {p.endgames}")
+    print(f"- Target Elo: {infer_target_elo(p)}")
+    print(f"- Adaptive Mode: {'ON' if p.adaptive_mode else 'OFF'}")
     return p
 
 
@@ -191,101 +532,33 @@ def _development_bonus(board, move):
 
 
 def choose_humanized_move(board, depth, movetime_ms, personality):
-    legal_moves = collect_legal_moves(board)
-    if not legal_moves:
-        return 0, {}
-
-    # Strong reference move from normal engine logic.
     base_result = run_search(board, depth, movetime_ms, verbose=False)
-    best_move = base_result["best_move"]
-    best_score = base_result["best_score"]
+    if base_result["best_move"] == 0:
+        return 0, {
+            "book": base_result.get("book", False),
+            "best_move": 0,
+            "best_score": base_result.get("best_score", 0),
+            "effective_accuracy": personality.accuracy,
+            "target_elo": infer_target_elo(personality),
+            "fallback": True,
+        }
 
-    endgame = is_endgame_position(board)
-    effective_accuracy = personality.accuracy
-    if endgame:
-        effective_accuracy = int((2 * effective_accuracy + personality.endgames) / 3)
-    if best_score < -150:
-        effective_accuracy = int((effective_accuracy * 0.7) + (personality.tenacity * 0.3))
-    effective_accuracy = max(0, min(100, effective_accuracy))
+    if base_result.get("book"):
+        return base_result["best_move"], {
+            "best_move": base_result["best_move"],
+            "best_score": base_result["best_score"],
+            "effective_accuracy": personality.accuracy,
+            "book": True,
+            "target_elo": infer_target_elo(personality),
+        }
 
-    scored = []
-    for move in legal_moves:
-        from_sq = (move & 0x7F)
-        capture = ((move >> 14) & 0xF) != 0 or (move & 0x40000) != 0
-        promotion = ((move >> 20) & 0xF) != 0
-        mover_piece = board.pieces[from_sq]
-
-        if not MakeMove(board, move):
-            continue
-
-        post_eval = -EvalPosition(board)
-        gives_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
-        TakeMove(board)
-
-        score = post_eval * 0.10
-
-        if move == best_move:
-            score += 30 + (effective_accuracy * 1.2)
-        if capture:
-            score += 10 + (personality.playstyle * 0.35) + (personality.temperament * 0.20)
-        if promotion:
-            score += 55
-        if gives_check:
-            score += 6 + (personality.playstyle * 0.22) + (personality.temperament * 0.22)
-
-        score += _development_bonus(board, move) * ((100 - personality.playstyle) * 0.35)
-
-        # Conservative bots avoid steep drops from best line; reckless bots tolerate risk.
-        if post_eval < (best_score - 80):
-            risk_penalty = (best_score - post_eval) * ((100 - personality.temperament) / 100.0) * 0.45
-            score -= risk_penalty
-
-        # Endgame preference: king activity and precision.
-        if endgame:
-            if mover_piece in (6, 12):
-                score += personality.endgames * 0.25
-            score += personality.endgames * 0.12
-        else:
-            # Non-endgame king drifting is punished for conservative styles.
-            if mover_piece in (6, 12):
-                score -= (100 - personality.temperament) * 0.18
-
-        noise_amp = (100 - effective_accuracy) * 0.60
-        score += random.uniform(-noise_amp, noise_amp)
-        scored.append((score, move))
-
-    if not scored:
-        return best_move, {"book": base_result.get("book", False), "fallback": True}
-
-    scored.sort(reverse=True, key=lambda x: x[0])
-
-    if effective_accuracy >= 96:
-        chosen = scored[0][1]
-    else:
-        top_band = 1 + ((100 - effective_accuracy) // 15) + (personality.temperament // 35)
-        top_band = max(1, min(len(scored), int(top_band)))
-        candidates = scored[:top_band]
-
-        temp = 0.35 + ((100 - effective_accuracy) / 45.0) + (personality.temperament / 120.0)
-        if endgame:
-            temp *= max(0.6, 1.2 - (personality.endgames / 140.0))
-        if best_score < -150:
-            if personality.tenacity < 40:
-                temp *= 1.25
-            elif personality.tenacity > 70:
-                temp *= 0.85
-
-        max_score = max(s for s, _ in candidates)
-        weights = [math.exp((s - max_score) / max(0.05, temp)) for s, _ in candidates]
-        chosen = random.choices([m for _, m in candidates], weights=weights, k=1)[0]
-
-    meta = {
-        "best_move": best_move,
-        "best_score": best_score,
-        "effective_accuracy": effective_accuracy,
-        "book": base_result.get("book", False),
-    }
-    return chosen, meta
+    return choose_trace_personality_move(
+        board,
+        depth,
+        movetime_ms,
+        personality,
+        base_result,
+    )
 
 
 def print_search_result(result, side_to_move):
@@ -330,16 +603,29 @@ def play_game_vs_engine():
     print(f"You play: {side_name(human_side)}")
     print(f"Engine plays: {side_name(engine_side)}")
     print("Enter moves like e2e4. Type q to quit.\n")
+    recorder = GameRecorder(
+        fen,
+        "Human" if human_side == Side.WHITE else "Hydra 1.0",
+        "Human" if human_side == Side.BLACK else "Hydra 1.0",
+    )
+    game_result = "*"
+    game_reason = "unfinished"
 
     while True:
         board.print_board()
-        if print_game_state_if_terminal(board):
+        result, reason = terminal_result(board)
+        if result is not None:
+            print_game_state_if_terminal(board)
+            game_result = result
+            game_reason = reason
             break
 
         if board.side == human_side:
             user_text = input("Your move (e2e4, q=quit): ").strip().lower()
             if user_text in ("q", "quit", "exit"):
                 print("Game ended.")
+                game_result = "*"
+                game_reason = "quit"
                 break
 
             move = ParseMove(user_text, board)
@@ -349,22 +635,33 @@ def play_game_vs_engine():
             if not MakeMove(board, move):
                 print("Illegal move. Try again.")
                 continue
+            TakeMove(board)
+            recorder.add_move(board, move)
+            MakeMove(board, move)
         else:
             print("Engine thinking...")
             result = run_search(board, depth, movetime_ms, verbose=False)
             best_move = result["best_move"]
             if best_move == 0:
                 print("Engine has no legal moves.")
-                if print_game_state_if_terminal(board):
-                    break
-                print("Draw.")
+                r, rsn = terminal_result(board)
+                if r is not None:
+                    print_game_state_if_terminal(board)
+                    game_result, game_reason = r, rsn
+                else:
+                    print("Draw.")
+                    game_result, game_reason = "1/2-1/2", "no-legal-move"
                 break
             print(
                 f"Engine plays: {PrMove(best_move)} "
                 f"(score {result['best_score']}, depth {result['completed_depth']})"
             )
             print_eval_meter_from_white_cp(result_white_cp(result, board.side))
+            recorder.add_move(board, best_move)
             MakeMove(board, best_move)
+
+    saved_path = recorder.save(game_result, game_reason)
+    print(f"Game saved: {saved_path}")
 
 
 def play_game_vs_humanized_bot():
@@ -377,37 +674,99 @@ def play_game_vs_humanized_bot():
     depth = ask_int("Bot base search depth", 4)
     movetime_ms = ask_int("Bot move time (ms, 0 means depth-only)", 0, 0)
     personality = configure_personality()
+    estimated_cap = estimate_bot_elo(depth, movetime_ms)
+    tracker = (
+        AdaptiveEloTracker(start_elo=estimated_cap, max_elo=estimated_cap)
+        if personality.adaptive_mode
+        else None
+    )
+    if tracker is not None:
+        personality.target_elo = tracker.current_elo
 
     print("\n=== Humanized Bot Match ===")
     print(f"Start FEN: {fen}")
     print(f"You play: {side_name(human_side)}")
     print(f"Humanized bot plays: {side_name(engine_side)}")
     print("Move format: e2e4")
+    if tracker is not None:
+        print(
+            "Adaptive Elo: ON "
+            f"(estimated bot ceiling {estimated_cap}, adapts to your move quality)"
+        )
     print("Type q to quit.\n")
+    recorder = GameRecorder(
+        fen,
+        "Human" if human_side == Side.WHITE else "Hydra Humanized",
+        "Human" if human_side == Side.BLACK else "Hydra Humanized",
+    )
+    game_result = "*"
+    game_reason = "unfinished"
 
     while True:
         board.print_board()
-        if print_game_state_if_terminal(board):
+        result, reason = terminal_result(board)
+        if result is not None:
+            print_game_state_if_terminal(board)
+            game_result = result
+            game_reason = reason
             break
 
         if board.side == human_side:
             user_text = input("Your move (e2e4, q=quit): ").strip().lower()
             if user_text in ("q", "quit", "exit"):
                 print("Game ended.")
+                game_result = "*"
+                game_reason = "quit"
                 break
 
             move = ParseMove(user_text, board)
-            if move == 0 or not MakeMove(board, move):
+            if move == 0:
                 print("Illegal move. Try again.")
                 continue
+
+            assessment = None
+            if tracker is not None:
+                assessment = assess_player_move(board, move, depth, movetime_ms)
+
+            if not MakeMove(board, move):
+                print("Illegal move. Try again.")
+                continue
+            TakeMove(board)
+            recorder.add_move(board, move)
+            MakeMove(board, move)
+
+            if tracker is not None and assessment is not None:
+                new_elo = tracker.update_from_cp_loss(assessment["cp_loss"])
+                personality.target_elo = new_elo
+                ref_text = PrMove(assessment["ref_move"]) if assessment["ref_move"] else "none"
+                print(
+                    "Adaptation | "
+                    f"your move quality: {assessment['quality']} "
+                    f"(loss {int(round(assessment['cp_loss']))}cp, best {assessment['best_cp']}cp, played {assessment['move_cp']}cp, ref {ref_text})"
+                )
+                print(
+                    "Adaptation | "
+                    f"bot elo now: {new_elo} "
+                    f"(avg loss {tracker.avg_loss:.1f}cp, blunder rate {tracker.blunder_rate * 100.0:.1f}%)"
+                )
         else:
             print("Humanized bot thinking...")
+            if tracker is not None:
+                print(
+                    "Thinking | "
+                    f"adaptive target elo: {tracker.current_elo}, "
+                    f"avg player loss: {tracker.avg_loss:.1f}cp"
+                )
             move, meta = choose_humanized_move(board, depth, movetime_ms, personality)
             if move == 0:
                 print("Bot has no legal moves.")
-                if print_game_state_if_terminal(board):
-                    break
-                print("Draw.")
+                r, rsn = terminal_result(board)
+                if r is not None:
+                    print_game_state_if_terminal(board)
+                    game_result, game_reason = r, rsn
+                else:
+                    print("Draw.")
+                    game_result, game_reason = "1/2-1/2", "no-legal-move"
                 break
 
             msg = f"Bot move: {PrMove(move)}"
@@ -415,11 +774,26 @@ def play_game_vs_humanized_bot():
                 msg += " [book]"
             msg += f" | ref: {PrMove(meta['best_move'])} ({meta['best_score']}cp)"
             msg += f" | acc: {meta['effective_accuracy']}"
+            if "target_elo" in meta:
+                msg += f" | elo: {meta['target_elo']}"
             print(msg)
+            if "trace_temperature" in meta:
+                print(f"Thinking | trace temperature: {meta['trace_temperature']}")
+            if "trace_top" in meta and meta["trace_top"]:
+                cand_parts = []
+                for item in meta["trace_top"]:
+                    cand_parts.append(
+                        f"{PrMove(item['move'])}(u={item['utility']},loss={item['loss_cp']}cp)"
+                    )
+                print("Thinking | top candidates: " + " | ".join(cand_parts))
             white_cp = meta["best_score"] if board.side == Side.WHITE else -meta["best_score"]
             print_eval_meter_from_white_cp(white_cp)
 
+            recorder.add_move(board, move)
             MakeMove(board, move)
+
+    saved_path = recorder.save(game_result, game_reason)
+    print(f"Game saved: {saved_path}")
 
 
 def evaluate_position_and_line():

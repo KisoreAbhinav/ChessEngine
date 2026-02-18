@@ -1,0 +1,11 @@
+[Event "Hydra Terminal Game"]
+[Site "Local"]
+[Date "2026.02.18"]
+[Round "-"]
+[White "Hydra Humanized"]
+[Black "Human"]
+[Result "1/2-1/2"]
+
+1. d4 c5 1/2-1/2
+{Reason: no-legal-move}
+{UCI: d2d4 c7c5}

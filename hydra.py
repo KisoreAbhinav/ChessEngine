@@ -101,34 +101,63 @@ def print_minor_divider(label=None):
 
 
 def print_learner_feedback(feedback):
+    def _unique_keep_order(lines):
+        out = []
+        seen = set()
+        for line in lines:
+            key = (line or "").strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(line)
+        return out
+
     print_minor_divider("Learner Guide")
     print(f"Learner | {feedback['headline']}")
 
     if feedback.get("highlights"):
-        print_minor_divider("Immediate Ideas")
+        print_minor_divider("Move Interpretation")
     for line in feedback.get("highlights", []):
         print(f"Learner | idea: {line}")
+
+    tactical = feedback.get("tactical_alerts", [])
+    if tactical:
+        print_minor_divider("Tactical Alerts")
+        for line in tactical[:4]:
+            print(f"Learner | ! {line}")
+
+    defensive = feedback.get("defensive_updates", [])
+    if defensive:
+        print_minor_divider("Defensive Update")
+        for line in defensive[:3]:
+            print(f"Learner | {line}")
 
     countered = feedback.get("countered_enemy_ideas", [])
     if countered:
         print_minor_divider("Countered Threats")
-        print("Learner | countered:")
-        for line in countered[:3]:
+        for line in _unique_keep_order(countered)[:3]:
             print(f"Learner | - {line}")
 
-    remaining = feedback.get("remaining_enemy_ideas", [])
+    remaining = _unique_keep_order(feedback.get("remaining_enemy_ideas", []))
     if remaining:
         print_minor_divider("Remaining Threats")
-        print("Learner | remaining threats:")
         for line in remaining[:3]:
             print(f"Learner | - {line}")
 
     own = feedback.get("own_ideas", [])
+    own_texts = _unique_keep_order([idea.get("text", "") for idea in own])
+    # Avoid showing the same sentence in both Remaining Threats and Current Plans.
+    remaining_set = {(x or "").strip().lower() for x in remaining}
+    own_texts = [x for x in own_texts if (x or "").strip().lower() not in remaining_set]
+
+    if not own_texts and own:
+        # Fallback if all own ideas were filtered as duplicates.
+        own_texts = _unique_keep_order([idea.get("text", "") for idea in own[:1]])
+
     if own:
         print_minor_divider("Current Plans")
-        print("Learner | current ideas:")
-        for idea in own[:4]:
-            print(f"Learner | - {idea['text']}")
+        for line in own_texts[:4]:
+            print(f"Learner | - {line}")
 
 # ---- Personality Models ----
 class Personality:

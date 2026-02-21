@@ -1,0 +1,11 @@
+[Event "Hydra Terminal Game"]
+[Site "Local"]
+[Date "2026.02.21"]
+[Round "-"]
+[White "Human"]
+[Black "Hydra 1.0"]
+[Result "*"]
+
+1. d4 Nf6 *
+{Reason: quit}
+{UCI: d2d4 g8f6}

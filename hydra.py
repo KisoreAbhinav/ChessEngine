@@ -19,15 +19,18 @@ from move_gen import GenerateAllMoves, MoveList
 from move_io import ParseMove, PrMove
 from search import IterativeDeepening
 from persona_trace import choose_trace_personality_move, infer_target_elo
+from predictions import build_move_feedback
 import math
 import os
 from datetime import datetime
 
-
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 BOOK_ENABLED = True
+LEARNER_GUIDE_ENABLED = False
+BORDER_EQ = "=" * 66
+BORDER_DASH = "-" * 66
 
-
+# ---- Input Helpers ----
 def ask_int(prompt, default_value, min_value=1):
     text = input(f"{prompt} [{default_value}]: ").strip()
     if not text:
@@ -40,16 +43,28 @@ def ask_int(prompt, default_value, min_value=1):
     except ValueError:
         return default_value
 
+def ask_percent(prompt, default_value=50):
+    return ask_int(prompt, default_value, 0)
 
+def ask_yes_no(prompt, default_yes=True):
+    default_tag = "Y/n" if default_yes else "y/N"
+    raw = input(f"{prompt} [{default_tag}]: ").strip().lower()
+    if not raw:
+        return default_yes
+    return raw in ("y", "yes", "1", "true")
+
+def ask_elo(prompt, default_value=1600):
+    value = ask_int(prompt, default_value, 400)
+    return max(400, min(2600, value))
+
+# ---- Display Helpers ----
 def side_name(side):
     return "White" if side == Side.WHITE else "Black"
-
 
 def cp_to_white_win_pct(cp):
     # Smooth centipawn -> win tendency mapping for display only.
     x = max(-1200, min(1200, cp))
     return 100.0 / (1.0 + math.exp(-x / 180.0))
-
 
 def print_eval_meter_from_white_cp(white_cp):
     pct = cp_to_white_win_pct(white_cp)
@@ -67,11 +82,55 @@ def print_eval_meter_from_white_cp(white_cp):
 
     print(f"Eval meter |W {pct:5.1f}%| [{bar}] {tag}")
 
-
 def result_white_cp(result, side_to_move):
     return result["best_score"] if side_to_move == Side.WHITE else -result["best_score"]
 
 
+def print_major_divider(label=None):
+    print(BORDER_EQ)
+    if label:
+        print(label)
+        print(BORDER_EQ)
+
+
+def print_minor_divider(label=None):
+    print(BORDER_DASH)
+    if label:
+        print(label)
+        print(BORDER_DASH)
+
+
+def print_learner_feedback(feedback):
+    print_minor_divider("Learner Guide")
+    print(f"Learner | {feedback['headline']}")
+
+    if feedback.get("highlights"):
+        print_minor_divider("Immediate Ideas")
+    for line in feedback.get("highlights", []):
+        print(f"Learner | idea: {line}")
+
+    countered = feedback.get("countered_enemy_ideas", [])
+    if countered:
+        print_minor_divider("Countered Threats")
+        print("Learner | countered:")
+        for line in countered[:3]:
+            print(f"Learner | - {line}")
+
+    remaining = feedback.get("remaining_enemy_ideas", [])
+    if remaining:
+        print_minor_divider("Remaining Threats")
+        print("Learner | remaining threats:")
+        for line in remaining[:3]:
+            print(f"Learner | - {line}")
+
+    own = feedback.get("own_ideas", [])
+    if own:
+        print_minor_divider("Current Plans")
+        print("Learner | current ideas:")
+        for idea in own[:4]:
+            print(f"Learner | - {idea['text']}")
+
+# ---- Personality Models ----
 class Personality:
     def __init__(
         self,
@@ -90,24 +149,6 @@ class Personality:
         self.endgames = max(0, min(100, int(endgames)))
         self.target_elo = max(0, min(2600, int(target_elo)))
         self.adaptive_mode = bool(adaptive_mode)
-
-
-def ask_percent(prompt, default_value=50):
-    return ask_int(prompt, default_value, 0)
-
-
-def ask_elo(prompt, default_value=1600):
-    value = ask_int(prompt, default_value, 400)
-    return max(400, min(2600, value))
-
-
-def ask_yes_no(prompt, default_yes=True):
-    default_tag = "Y/n" if default_yes else "y/N"
-    raw = input(f"{prompt} [{default_tag}]: ").strip().lower()
-    if not raw:
-        return default_yes
-    return raw in ("y", "yes", "1", "true")
-
 
 class AdaptiveEloTracker:
     def __init__(self, start_elo=2600, min_elo=700, max_elo=2600):
@@ -145,7 +186,6 @@ class AdaptiveEloTracker:
         smoothed = int(round((0.72 * self.current_elo) + (0.28 * target)))
         self.current_elo = max(self.min_elo, min(self.max_elo, smoothed))
         return self.current_elo
-
 
 def estimate_bot_elo(depth, movetime_ms):
     if depth <= 1:
@@ -188,10 +228,20 @@ def estimate_bot_elo(depth, movetime_ms):
 
     return max(700, min(2450, base + time_bonus))
 
+def classify_move_quality(cp_loss):
+    if cp_loss <= 20:
+        return "excellent"
+    if cp_loss <= 60:
+        return "good"
+    if cp_loss <= 120:
+        return "inaccuracy"
+    if cp_loss <= 220:
+        return "mistake"
+    return "blunder"
 
+# ---- Move/Notation Helpers ----
 def _sq_to_alg(sq):
     return f"{chr(ord('a') + FilesBoard[sq])}{RanksBoard[sq] + 1}"
-
 
 def _piece_letter(piece):
     if piece in (Pieces.wN, Pieces.bN):
@@ -206,7 +256,6 @@ def _piece_letter(piece):
         return "K"
     return ""
 
-
 def _promotion_letter(piece):
     if piece in (Pieces.wN, Pieces.bN):
         return "N"
@@ -215,7 +264,6 @@ def _promotion_letter(piece):
     if piece in (Pieces.wR, Pieces.bR):
         return "R"
     return "Q"
-
 
 def _move_disambiguation(board, move, piece):
     from_sq = FROMSQ(move)
@@ -248,7 +296,6 @@ def _move_disambiguation(board, move, piece):
     if not same_rank:
         return str(from_rank + 1)
     return f"{chr(ord('a') + from_file)}{from_rank + 1}"
-
 
 def move_to_san(board, move):
     from_sq = FROMSQ(move)
@@ -287,7 +334,48 @@ def move_to_san(board, move):
     TakeMove(board)
     return san
 
+# ---- Board/Position Helpers ----
+def load_fen_interactive(board):
+    fen = input("Enter FEN (blank = start position):\n> ").strip()
+    if not fen:
+        fen = START_FEN
+    board.parse_fen(fen)
+    return fen
 
+def count_legal_moves(board):
+    move_list = MoveList()
+    GenerateAllMoves(board, move_list)
+    legal = 0
+    for i in range(move_list.count):
+        if MakeMove(board, move_list.moves[i].move):
+            legal += 1
+            TakeMove(board)
+    return legal
+
+def terminal_result(board):
+    legal = count_legal_moves(board)
+    if legal > 0:
+        return None, None
+    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
+    if in_check:
+        if board.side == Side.WHITE:
+            return "0-1", "checkmate"
+        return "1-0", "checkmate"
+    return "1/2-1/2", "stalemate"
+
+def print_game_state_if_terminal(board):
+    legal = count_legal_moves(board)
+    if legal > 0:
+        return False
+    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
+    if in_check:
+        winner = "Black" if board.side == Side.WHITE else "White"
+        print(f"Checkmate. {winner} wins.")
+    else:
+        print("Stalemate.")
+    return True
+
+# ---- Recording ----
 class GameRecorder:
     def __init__(self, start_fen, white_name, black_name):
         self.start_fen = start_fen
@@ -339,30 +427,93 @@ class GameRecorder:
 
         return path
 
+# ---- Search Integration ----
+def run_search(board, depth, movetime_ms, verbose=False):
+    if BOOK_ENABLED:
+        book_move = get_book_move(board)
+        if book_move != 0:
+            return {
+                "best_move": book_move,
+                "best_move_str": PrMove(book_move),
+                "best_score": EvalPosition(board),
+                "completed_depth": 0,
+                "nodes": 0,
+                "cutoffs": 0,
+                "first_cutoffs": 0,
+                "stopped": 0,
+                "quit": 0,
+                "pv": [PrMove(book_move)],
+                "book": True,
+            }
+    return IterativeDeepening(
+        board,
+        max_depth=depth,
+        time_limit_ms=movetime_ms,
+        stdin_enabled=False,
+        verbose=verbose,
+    )
 
-def terminal_result(board):
-    legal = count_legal_moves(board)
-    if legal > 0:
-        return None, None
-    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
-    if in_check:
-        if board.side == Side.WHITE:
-            return "0-1", "checkmate"
-        return "1-0", "checkmate"
-    return "1/2-1/2", "stalemate"
+def collect_legal_moves(board):
+    legal_moves = []
+    move_list = MoveList()
+    GenerateAllMoves(board, move_list)
+    for i in range(move_list.count):
+        move = move_list.moves[i].move
+        if MakeMove(board, move):
+            legal_moves.append(move)
+            TakeMove(board)
+    return legal_moves
 
+def is_endgame_position(board):
+    white_heavy = board.pce_num[4] + board.pce_num[5]
+    black_heavy = board.pce_num[10] + board.pce_num[11]
+    white_minor = board.pce_num[2] + board.pce_num[3]
+    black_minor = board.pce_num[8] + board.pce_num[9]
+    total_non_pawn = white_heavy + black_heavy + white_minor + black_minor
+    return total_non_pawn <= 6
 
-def classify_move_quality(cp_loss):
-    if cp_loss <= 20:
-        return "excellent"
-    if cp_loss <= 60:
-        return "good"
-    if cp_loss <= 120:
-        return "inaccuracy"
-    if cp_loss <= 220:
-        return "mistake"
-    return "blunder"
+def _development_bonus(board, move):
+    from_sq = (move & 0x7F)
+    to_sq = ((move >> 7) & 0x7F)
+    piece = board.pieces[from_sq]
+    # Knight / bishop development from back rank.
+    if piece in (2, 3, 8, 9):
+        from_rank = (from_sq // 10) - 2
+        if from_rank in (0, 7):
+            return 1.0
+    # Center occupation bonus.
+    if to_sq in (44, 45, 54, 55):
+        return 0.6
+    return 0.0
 
+def choose_humanized_move(board, depth, movetime_ms, personality):
+    base_result = run_search(board, depth, movetime_ms, verbose=False)
+    if base_result["best_move"] == 0:
+        return 0, {
+            "book": base_result.get("book", False),
+            "best_move": 0,
+            "best_score": base_result.get("best_score", 0),
+            "effective_accuracy": personality.accuracy,
+            "target_elo": infer_target_elo(personality),
+            "fallback": True,
+        }
+
+    if base_result.get("book"):
+        return base_result["best_move"], {
+            "best_move": base_result["best_move"],
+            "best_score": base_result["best_score"],
+            "effective_accuracy": personality.accuracy,
+            "book": True,
+            "target_elo": infer_target_elo(personality),
+        }
+
+    return choose_trace_personality_move(
+        board,
+        depth,
+        movetime_ms,
+        personality,
+        base_result,
+    )
 
 def assess_player_move(board, move, depth, movetime_ms):
     analysis_depth = max(2, min(depth, 4))
@@ -388,7 +539,7 @@ def assess_player_move(board, move, depth, movetime_ms):
         "ref_move": ref_move,
     }
 
-
+# ---- Menu Configuration ----
 def configure_personality():
     print("\n=== Humanized Bot Personality ===")
     adaptive_mode = ask_yes_no("Enable adaptive mode (auto strength adapts to your play)?", True)
@@ -436,142 +587,21 @@ def configure_personality():
     print(f"- Adaptive Mode: {'ON' if p.adaptive_mode else 'OFF'}")
     return p
 
-
-def load_fen_interactive(board):
-    fen = input("Enter FEN (blank = start position):\n> ").strip()
-    if not fen:
-        fen = START_FEN
-    board.parse_fen(fen)
-    return fen
-
-
-def count_legal_moves(board):
-    move_list = MoveList()
-    GenerateAllMoves(board, move_list)
-    legal = 0
-    for i in range(move_list.count):
-        if MakeMove(board, move_list.moves[i].move):
-            legal += 1
-            TakeMove(board)
-    return legal
-
-
-def print_game_state_if_terminal(board):
-    legal = count_legal_moves(board)
-    if legal > 0:
-        return False
-    in_check = board.is_sq_attacked(board.king_sq[board.side], board.side ^ 1)
-    if in_check:
-        winner = "Black" if board.side == Side.WHITE else "White"
-        print(f"Checkmate. {winner} wins.")
-    else:
-        print("Stalemate.")
-    return True
-
-
-def run_search(board, depth, movetime_ms, verbose=False):
-    if BOOK_ENABLED:
-        book_move = get_book_move(board)
-        if book_move != 0:
-            return {
-                "best_move": book_move,
-                "best_move_str": PrMove(book_move),
-                "best_score": EvalPosition(board),
-                "completed_depth": 0,
-                "nodes": 0,
-                "cutoffs": 0,
-                "first_cutoffs": 0,
-                "stopped": 0,
-                "quit": 0,
-                "pv": [PrMove(book_move)],
-                "book": True,
-            }
-    return IterativeDeepening(
-        board,
-        max_depth=depth,
-        time_limit_ms=movetime_ms,
-        stdin_enabled=False,
-        verbose=verbose,
-    )
-
-
-def collect_legal_moves(board):
-    legal_moves = []
-    move_list = MoveList()
-    GenerateAllMoves(board, move_list)
-    for i in range(move_list.count):
-        move = move_list.moves[i].move
-        if MakeMove(board, move):
-            legal_moves.append(move)
-            TakeMove(board)
-    return legal_moves
-
-
-def is_endgame_position(board):
-    white_heavy = board.pce_num[4] + board.pce_num[5]
-    black_heavy = board.pce_num[10] + board.pce_num[11]
-    white_minor = board.pce_num[2] + board.pce_num[3]
-    black_minor = board.pce_num[8] + board.pce_num[9]
-    total_non_pawn = white_heavy + black_heavy + white_minor + black_minor
-    return total_non_pawn <= 6
-
-
-def _development_bonus(board, move):
-    from_sq = (move & 0x7F)
-    to_sq = ((move >> 7) & 0x7F)
-    piece = board.pieces[from_sq]
-    # Knight / bishop development from back rank.
-    if piece in (2, 3, 8, 9):
-        from_rank = (from_sq // 10) - 2
-        if from_rank in (0, 7):
-            return 1.0
-    # Center occupation bonus.
-    if to_sq in (44, 45, 54, 55):
-        return 0.6
-    return 0.0
-
-
-def choose_humanized_move(board, depth, movetime_ms, personality):
-    base_result = run_search(board, depth, movetime_ms, verbose=False)
-    if base_result["best_move"] == 0:
-        return 0, {
-            "book": base_result.get("book", False),
-            "best_move": 0,
-            "best_score": base_result.get("best_score", 0),
-            "effective_accuracy": personality.accuracy,
-            "target_elo": infer_target_elo(personality),
-            "fallback": True,
-        }
-
-    if base_result.get("book"):
-        return base_result["best_move"], {
-            "best_move": base_result["best_move"],
-            "best_score": base_result["best_score"],
-            "effective_accuracy": personality.accuracy,
-            "book": True,
-            "target_elo": infer_target_elo(personality),
-        }
-
-    return choose_trace_personality_move(
-        board,
-        depth,
-        movetime_ms,
-        personality,
-        base_result,
-    )
-
-
+# ---- Menu Actions ----
 def print_search_result(result, side_to_move):
+    print_minor_divider("Search Result")
     pv_text = " ".join(result["pv"]) if result["pv"] else "(none)"
     if result.get("book"):
         print("Source: Opening book")
+    print_minor_divider("Top Move")
     print(f"Best move: {result['best_move_str']}")
     print(f"Eval (cp): {result['best_score']}")
     print_eval_meter_from_white_cp(result_white_cp(result, side_to_move))
+    print_minor_divider("Search Stats")
     print(f"Depth reached: {result['completed_depth']}")
     print(f"Nodes: {result['nodes']}")
+    print_minor_divider("Principal Variation")
     print(f"Best line (PV): {pv_text}")
-
 
 def analyze_best_move_only():
     board = Board()
@@ -581,6 +611,7 @@ def analyze_best_move_only():
 
     print("\nLoaded position:")
     board.print_board()
+    print_major_divider()
     print(f"\nFEN: {fen}")
     print("\nAnalyzing best move...")
 
@@ -588,6 +619,24 @@ def analyze_best_move_only():
     print("\nSearch result")
     print_search_result(result, board.side)
 
+def evaluate_position_and_line():
+    board = Board()
+    fen = load_fen_interactive(board)
+    depth = ask_int("Search depth", 5)
+    movetime_ms = ask_int("Move time (ms, 0 means depth-only)", 0, 0)
+
+    print("\nLoaded position:")
+    board.print_board()
+    print_major_divider()
+    print(f"\nFEN: {fen}")
+
+    static_eval = EvalPosition(board)
+    print(f"Static eval (cp, side-to-move perspective): {static_eval}")
+
+    print("Searching for best sequence...")
+    result = run_search(board, depth, movetime_ms, verbose=False)
+    print("\nEvaluation + best sequence")
+    print_search_result(result, board.side)
 
 def play_game_vs_engine():
     board = Board()
@@ -603,16 +652,20 @@ def play_game_vs_engine():
     print(f"You play: {side_name(human_side)}")
     print(f"Engine plays: {side_name(engine_side)}")
     print("Enter moves like e2e4. Type q to quit.\n")
+    print_major_divider("Game Start")
     recorder = GameRecorder(
         fen,
         "Human" if human_side == Side.WHITE else "Hydra 1.0",
         "Human" if human_side == Side.BLACK else "Hydra 1.0",
     )
+    tracked_human_ideas = []
+    tracked_engine_ideas = []
     game_result = "*"
     game_reason = "unfinished"
 
     while True:
         board.print_board()
+        print_major_divider()
         result, reason = terminal_result(board)
         if result is not None:
             print_game_state_if_terminal(board)
@@ -636,8 +689,25 @@ def play_game_vs_engine():
                 print("Illegal move. Try again.")
                 continue
             TakeMove(board)
+
+            learner_feedback = None
+            if LEARNER_GUIDE_ENABLED:
+                learner_feedback = build_move_feedback(
+                    board,
+                    move,
+                    human_side,
+                    "You",
+                    previous_enemy_ideas=tracked_engine_ideas,
+                )
+
             recorder.add_move(board, move)
             MakeMove(board, move)
+            print(f"You played: {PrMove(move)}")
+            print_major_divider()
+            if LEARNER_GUIDE_ENABLED and learner_feedback:
+                print_learner_feedback(learner_feedback)
+                tracked_human_ideas = learner_feedback.get("own_ideas", [])
+                tracked_engine_ideas = learner_feedback.get("enemy_ideas", [])
         else:
             print("Engine thinking...")
             result = run_search(board, depth, movetime_ms, verbose=False)
@@ -657,12 +727,28 @@ def play_game_vs_engine():
                 f"(score {result['best_score']}, depth {result['completed_depth']})"
             )
             print_eval_meter_from_white_cp(result_white_cp(result, board.side))
+
+            learner_feedback = None
+            if LEARNER_GUIDE_ENABLED:
+                learner_feedback = build_move_feedback(
+                    board,
+                    best_move,
+                    engine_side,
+                    "Engine",
+                    previous_enemy_ideas=tracked_human_ideas,
+                )
+
             recorder.add_move(board, best_move)
             MakeMove(board, best_move)
+            print_major_divider()
+            if LEARNER_GUIDE_ENABLED and learner_feedback:
+                print_learner_feedback(learner_feedback)
+                tracked_engine_ideas = learner_feedback.get("own_ideas", [])
+                tracked_human_ideas = learner_feedback.get("enemy_ideas", [])
 
     saved_path = recorder.save(game_result, game_reason)
+    print_major_divider("Game Saved")
     print(f"Game saved: {saved_path}")
-
 
 def play_game_vs_humanized_bot():
     board = Board()
@@ -694,16 +780,20 @@ def play_game_vs_humanized_bot():
             f"(estimated bot ceiling {estimated_cap}, adapts to your move quality)"
         )
     print("Type q to quit.\n")
+    print_major_divider("Game Start")
     recorder = GameRecorder(
         fen,
         "Human" if human_side == Side.WHITE else "Hydra Humanized",
         "Human" if human_side == Side.BLACK else "Hydra Humanized",
     )
+    tracked_human_ideas = []
+    tracked_engine_ideas = []
     game_result = "*"
     game_reason = "unfinished"
 
     while True:
         board.print_board()
+        print_major_divider()
         result, reason = terminal_result(board)
         if result is not None:
             print_game_state_if_terminal(board)
@@ -732,8 +822,25 @@ def play_game_vs_humanized_bot():
                 print("Illegal move. Try again.")
                 continue
             TakeMove(board)
+
+            learner_feedback = None
+            if LEARNER_GUIDE_ENABLED:
+                learner_feedback = build_move_feedback(
+                    board,
+                    move,
+                    human_side,
+                    "You",
+                    previous_enemy_ideas=tracked_engine_ideas,
+                )
+
             recorder.add_move(board, move)
             MakeMove(board, move)
+            print(f"You played: {PrMove(move)}")
+            print_major_divider()
+            if LEARNER_GUIDE_ENABLED and learner_feedback:
+                print_learner_feedback(learner_feedback)
+                tracked_human_ideas = learner_feedback.get("own_ideas", [])
+                tracked_engine_ideas = learner_feedback.get("enemy_ideas", [])
 
             if tracker is not None and assessment is not None:
                 new_elo = tracker.update_from_cp_loss(assessment["cp_loss"])
@@ -789,48 +896,49 @@ def play_game_vs_humanized_bot():
             white_cp = meta["best_score"] if board.side == Side.WHITE else -meta["best_score"]
             print_eval_meter_from_white_cp(white_cp)
 
+            learner_feedback = None
+            if LEARNER_GUIDE_ENABLED:
+                learner_feedback = build_move_feedback(
+                    board,
+                    move,
+                    engine_side,
+                    "Bot",
+                    previous_enemy_ideas=tracked_human_ideas,
+                )
+
             recorder.add_move(board, move)
             MakeMove(board, move)
+            print_major_divider()
+            if LEARNER_GUIDE_ENABLED and learner_feedback:
+                print_learner_feedback(learner_feedback)
+                tracked_engine_ideas = learner_feedback.get("own_ideas", [])
+                tracked_human_ideas = learner_feedback.get("enemy_ideas", [])
 
     saved_path = recorder.save(game_result, game_reason)
+    print_major_divider("Game Saved")
     print(f"Game saved: {saved_path}")
 
-
-def evaluate_position_and_line():
-    board = Board()
-    fen = load_fen_interactive(board)
-    depth = ask_int("Search depth", 5)
-    movetime_ms = ask_int("Move time (ms, 0 means depth-only)", 0, 0)
-
-    print("\nLoaded position:")
-    board.print_board()
-    print(f"\nFEN: {fen}")
-
-    static_eval = EvalPosition(board)
-    print(f"Static eval (cp, side-to-move perspective): {static_eval}")
-
-    print("Searching for best sequence...")
-    result = run_search(board, depth, movetime_ms, verbose=False)
-    print("\nEvaluation + best sequence")
-    print_search_result(result, board.side)
-
-
+# ---- Entry Point ----
 def main():
-    global BOOK_ENABLED
+    global BOOK_ENABLED, LEARNER_GUIDE_ENABLED
 
     print("Initializing Hydra 1.0")
     AllInit()
     load_opening_book("openings.txt")
 
     while True:
-        print("\n----------Hydra Terminal Menu---------------")
+        print_major_divider("Hydra Terminal Menu")
         print(f"Opening Book: {'ON' if BOOK_ENABLED else 'OFF'}")
+        print(f"Learner Guide: {'ON' if LEARNER_GUIDE_ENABLED else 'OFF'}")
+        print_minor_divider("Options")
         print("1) Find the best move in a position (FEN)")
         print("2) Play against the Hydra 1.0 (choose White/Black)")
         print("3) Load position, evaluate, and show best continuation")
         print("4) Toggle opening book ON/OFF")
         print("5) Play against a humanized bot (personality sliders)")
-        print("6) Exit")
+        print("6) Toggle learner guide ON/OFF")
+        print("7) Exit")
+        print_major_divider()
         choice = input("> ").strip()
 
         if choice == "1":
@@ -845,11 +953,13 @@ def main():
         elif choice == "5":
             play_game_vs_humanized_bot()
         elif choice == "6":
+            LEARNER_GUIDE_ENABLED = not LEARNER_GUIDE_ENABLED
+            print(f"Learner guide is now {'ON' if LEARNER_GUIDE_ENABLED else 'OFF'}.")
+        elif choice == "7":
             print("Thank You For Using Hydra 1.0.")
             break
         else:
             print("Invalid option.")
-
 
 if __name__ == "__main__":
     main()

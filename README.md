@@ -58,6 +58,8 @@ persona_trace.py - humanized/adaptive personality move-selection layer and Elo a
 
 data.py - shared static data tables used by engine components.
 
+tablebase_5man_basic.py - basic 5-man seed tablebase module (curated FEN lookup entries, probe helpers, and verdict hints).
+
 Old engine (basic)/ - older baseline engine version kept for reference.
 
 
@@ -161,6 +163,10 @@ persona_trace.py implements humanized/adaptive play behavior.
 - Converts target Elo / personality controls into move-choice shaping.
 - Can adapt strength during game based on user move quality.
 
+tablebase_5man_basic.py provides a basic endgame lookup layer.
+- Stores exact-seed 5-man FEN outcomes and optional best-move hints.
+- Can be probed to return direct endgame verdicts when a matching seed is found.
+
 ### 7. Learner/Interpretation Layer
 
 predictions.py explains ideas and tactical themes.
@@ -258,5 +264,150 @@ data.py holds shared data tables used across modules.
 - Search phase: search.py, move_gen.py, make_mov.py, evaluate.py, pvtable.py
 - Validation/debug phase: perft.py, validate.py, defs.py (check_board)
 - UX/interaction phase: hydra.py, uci.py
-- Extension phase: book.py, persona_trace.py, predictions.py
+- Extension phase: book.py, persona_trace.py, predictions.py, tablebase_5man_basic.py
 
+---
+
+## Detailed Module Definitions (Definition + Working + Example)
+
+defs.py
+- Definition: Central schema of the engine (pieces, squares, board state, move masks, constants).
+- How it works: Every other module depends on this file for common data contracts. Board.parse_fen converts a FEN string into full engine state.
+- Example: If FEN says white to move with KQkq rights, defs.py stores side, castling bits, en-passant square, piece list, and position hash.
+
+hashkeys.py
+- Definition: Zobrist hashing system for unique board keys.
+- How it works: Combines random numbers for piece-square occupancy, side-to-move, castling, and en-passant into one pos_key.
+- Example: Same board from different move orders gets same pos_key, so repetition and PV lookup still work.
+
+validate.py
+- Definition: Safety/validation helpers for board and move correctness.
+- How it works: Assertions are used in critical places to catch illegal state transitions while developing/testing.
+- Example: If a move corrupts a king square, validation fails early instead of silently poisoning search.
+
+move_gen.py
+- Definition: Move generator for all piece types and special rules.
+- How it works: Builds move lists for current side including promotions, en-passant, castling, captures, and quiet moves.
+- Example: In a position with en-passant available, move_gen.py adds only legal EP candidates to the list.
+
+make_mov.py
+- Definition: State transition engine (make and unmake).
+- How it works: MakeMove applies a move and updates all board metadata; TakeMove restores previous snapshot from history.
+- Example: During AlphaBeta recursion, each candidate move is made, searched, then fully rolled back by TakeMove.
+
+move_io.py
+- Definition: Human/GUI move string parser and printer.
+- How it works: Converts UCI-like text move e2e4 into packed move integer and back for output.
+- Example: User input a7a8q maps to correct promotion move only if that promotion is legal.
+
+evaluate.py
+- Definition: Static board evaluator.
+- How it works: Produces centipawn score from material and positional signals (piece-square logic and phase-aware terms).
+- Example: Centralized knight and safer king can improve eval even without immediate tactics.
+
+search.py
+- Definition: Main decision-making algorithm.
+- How it works: Iterative deepening drives Negamax AlphaBeta; quiescence stabilizes tactical leaves; heuristics improve move ordering.
+- Example: At depth 6, good ordering causes early beta cutoffs and reduces nodes dramatically.
+
+pvtable.py
+- Definition: Principal variation storage and retrieval.
+- How it works: Best move for a hashed position is stored/probed, then stitched into a PV line after each completed depth.
+- Example: If depth 5 likes move g1f3, depth 6 searches it first for faster pruning.
+
+perft.py
+- Definition: Search-tree correctness tester.
+- How it works: Counts legal leaf nodes at fixed depth and compares with known perft references.
+- Example: If perft depth 3 count is wrong, move generation or make/unmake has a bug.
+
+book.py
+- Definition: Opening-book loader and weighted move picker.
+- How it works: Reads openings.txt lines, records move frequencies by position key, and returns legal book moves when available.
+- Example: In start position, book may prefer e2e4/d2d4 lines before engine search starts.
+
+openings.txt
+- Definition: Text opening repertoire in coordinate notation.
+- How it works: Each line is a legal move sequence from start position; shared prefixes create book breadth and depth.
+- Example: Long Sicilian/Catalan/KID lines allow stronger early middlegame transitions.
+
+persona_trace.py
+- Definition: Humanized/adaptive personality layer.
+- How it works: Re-scores candidate moves using style dimensions and optional adaptive target Elo.
+- Example: With lower target Elo and higher temperament, engine picks playable but not always top-engine moves.
+
+predictions.py
+- Definition: Learner interpretation engine.
+- How it works: Builds plan/threat snapshots before and after moves and explains tactical/strategic implications.
+- Example: It can report pin-to-queen danger, countered threats, and remaining attacking ideas.
+
+tablebase_5man_basic.py
+- Definition: Basic 5-man seed tablebase lookup.
+- How it works: Stores curated 5-piece FEN keys with verdict and optional best-move hints. Probe function returns exact stored entry.
+- Example: If a position matches a stored 5-man FEN, engine/UI can show immediate result hint (white_win/draw/black_win).
+- Note: This is a starter seed set, not a full Syzygy replacement.
+
+uci.py
+- Definition: Universal Chess Interface communication layer.
+- How it works: Parses commands like uci, isready, position, go, stop, quit and routes them to engine core.
+- Example: GUI sends go depth 10, engine replies with info lines and final bestmove.
+
+hydra.py
+- Definition: Terminal control center and user experience layer.
+- How it works: Offers menu-based analysis/game modes, opening book toggle, learner guide display, and humanized play mode.
+- Example: Option 1 loads FEN, runs search, prints best move, eval meter, PV, and stats.
+
+misc.py
+- Definition: Utility runtime helpers.
+- How it works: Timing and input helpers used by search loop for stop checks and time control.
+- Example: Search checks elapsed time periodically and stops cleanly when budget is exhausted.
+
+data.py
+- Definition: Shared static data tables.
+- How it works: Centralizes reusable constants/tables to avoid duplication and keep module logic clean.
+- Example: Piece-related helper values are consumed by evaluation and move-order logic.
+
+---
+
+## Worked Example (Full Engine Flow Showcase)
+
+Scenario:
+- Input position: start FEN.
+- Mode: terminal, best-move analysis.
+- Depth: 6.
+- Opening book: ON.
+- Learner mode: ON.
+
+Step 1: hydra.py reads user mode and FEN input.
+- If blank FEN, start position is loaded.
+
+Step 2: defs.py Board.parse_fen builds board state.
+- Piece arrays, side-to-move, castling rights, and pos_key are initialized.
+
+Step 3: book.py checks openings.txt.
+- If current position has a valid book entry, a weighted legal opening move may be returned instantly.
+- If no book move found, search.py is called.
+
+Step 4: search.py iterative deepening starts.
+- Depth 1, 2, 3... up to requested depth/time.
+- Each node calls move_gen.py, then make_mov.py for recurse/rollback.
+- evaluate.py scores quiet leaves via quiescence path.
+- pvtable.py records current best line.
+
+Step 5: best move is produced.
+- hydra.py prints move, score, depth reached, nodes, and PV line.
+
+Step 6: learner interpretation is generated.
+- predictions.py compares plans/threats and prints what changed after the move.
+- Example output can include:
+  - immediate move meaning
+  - tactical alert (pin/trap)
+  - what threats were neutralized
+  - what threats still remain
+
+Step 7: if position enters known 5-man seed domain.
+- tablebase_5man_basic.py probe can return direct verdict/hint for matching FEN key.
+
+Final effect:
+- Early phase quality: strengthened by opening book.
+- Middle phase quality: strengthened by alpha-beta + ordering + quiescence.
+- End phase quality: supported by exact 5-man seed lookups where available.

@@ -177,6 +177,12 @@ predictions.py explains ideas and tactical themes.
   - remaining threats
   - current plans
 - Includes tactical motifs like pressure, forks, open files, and pin-related warnings.
+- Uses principal variation (PV) from search to explain what the engine is planning next.
+- Generates basic warning checks after each move:
+  - king safety/check pressure
+  - hanging (attacked and undefended) pieces
+  - immediate opponent checking resources
+  - pinned-to-queen danger
 
 ### 8. Interfaces and Runtime Modes
 
@@ -337,8 +343,13 @@ persona_trace.py
 
 predictions.py
 - Definition: Learner interpretation engine.
-- How it works: Builds plan/threat snapshots before and after moves and explains tactical/strategic implications.
-- Example: It can report pin-to-queen danger, countered threats, and remaining attacking ideas.
+- How it works: Builds plan/threat snapshots before and after moves, then merges that with search PV to explain intended continuation.
+- Example: It can report a trap setup plan ("expected reply, then follow-up"), plus pin-to-queen danger and remaining attacking ideas.
+- Basic warnings included:
+  - king danger warning
+  - hanging piece warning
+  - forcing-check warning
+  - pin warning
 
 tablebase_5man_basic.py
 - Definition: Basic 5-man seed tablebase lookup.
@@ -398,9 +409,12 @@ Step 5: best move is produced.
 
 Step 6: learner interpretation is generated.
 - predictions.py compares plans/threats and prints what changed after the move.
+- predictions.py also reads the current PV line to explain intended engine plan.
 - Example output can include:
   - immediate move meaning
+  - planned line and expected reply/follow-up
   - tactical alert (pin/trap)
+  - basic warnings (king safety, hanging piece, forcing checks, pins)
   - what threats were neutralized
   - what threats still remain
 

@@ -126,11 +126,23 @@ def print_learner_feedback(feedback):
         for line in tactical[:4]:
             print(f"Learner | ! {line}")
 
+    plan_lines = feedback.get("plan_lines", [])
+    if plan_lines:
+        print_minor_divider("Engine Plan")
+        for line in plan_lines[:3]:
+            print(f"Learner | {line}")
+
     defensive = feedback.get("defensive_updates", [])
     if defensive:
         print_minor_divider("Defensive Update")
         for line in defensive[:3]:
             print(f"Learner | {line}")
+
+    warnings = feedback.get("basic_warnings", [])
+    if warnings:
+        print_minor_divider("Basic Warnings")
+        for line in warnings[:4]:
+            print(f"Learner | ! {line}")
 
     countered = feedback.get("countered_enemy_ideas", [])
     if countered:
@@ -524,6 +536,7 @@ def choose_humanized_move(board, depth, movetime_ms, personality):
             "best_score": base_result.get("best_score", 0),
             "effective_accuracy": personality.accuracy,
             "target_elo": infer_target_elo(personality),
+            "pv": base_result.get("pv", []),
             "fallback": True,
         }
 
@@ -534,15 +547,18 @@ def choose_humanized_move(board, depth, movetime_ms, personality):
             "effective_accuracy": personality.accuracy,
             "book": True,
             "target_elo": infer_target_elo(personality),
+            "pv": base_result.get("pv", []),
         }
 
-    return choose_trace_personality_move(
+    move, meta = choose_trace_personality_move(
         board,
         depth,
         movetime_ms,
         personality,
         base_result,
     )
+    meta["pv"] = base_result.get("pv", [])
+    return move, meta
 
 def assess_player_move(board, move, depth, movetime_ms):
     analysis_depth = max(2, min(depth, 4))
@@ -765,6 +781,7 @@ def play_game_vs_engine():
                     engine_side,
                     "Engine",
                     previous_enemy_ideas=tracked_human_ideas,
+                    planned_pv=result.get("pv", []),
                 )
 
             recorder.add_move(board, best_move)
@@ -933,6 +950,7 @@ def play_game_vs_humanized_bot():
                     engine_side,
                     "Bot",
                     previous_enemy_ideas=tracked_human_ideas,
+                    planned_pv=meta.get("pv", []),
                 )
 
             recorder.add_move(board, move)

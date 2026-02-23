@@ -523,7 +523,107 @@ def _move_effect_lines(
     return lines[:4]
 
 
-def build_move_feedback(board, move, actor_side, actor_label, previous_enemy_ideas=None):
+def _wing_from_uci_move(move_txt):
+    if not move_txt or len(move_txt) < 4:
+        return None
+    file_char = move_txt[2]
+    if file_char in ("a", "b", "c"):
+        return "queenside"
+    if file_char in ("f", "g", "h"):
+        return "kingside"
+    if file_char in ("d", "e"):
+        return "center"
+    return None
+
+
+def _plan_lines_from_pv(move, actor_side, actor_label, planned_pv):
+    if not planned_pv:
+        return []
+
+    line = [x.strip() for x in planned_pv if x and x.strip()]
+    if not line:
+        return []
+
+    if line[0] != PrMove(move):
+        line = [PrMove(move)] + [x for x in line if x != PrMove(move)]
+
+    line = line[:5]
+    lines = [f"Planned line: {' '.join(line)}"]
+
+    if len(line) >= 3:
+        enemy_label = SIDE_NAME[actor_side ^ 1]
+        lines.append(
+            f"Plan idea: after {line[0]}, expects {enemy_label} reply {line[1]}, then {actor_label} follows with {line[2]}."
+        )
+
+    wing_counts = {"queenside": 0, "center": 0, "kingside": 0}
+    for mv in line[:4]:
+        wing = _wing_from_uci_move(mv)
+        if wing in wing_counts:
+            wing_counts[wing] += 1
+    best_wing = max(wing_counts, key=wing_counts.get)
+    if wing_counts[best_wing] >= 2:
+        lines.append(f"Plan focus: {best_wing} pressure in the current principal line.")
+
+    return lines[:3]
+
+
+def _basic_warning_lines(board, actor_side):
+    enemy = actor_side ^ 1
+    warnings = []
+
+    if board.is_sq_attacked(board.king_sq[actor_side], enemy):
+        warnings.append("King safety warning: your king is in check or under direct forcing pressure.")
+
+    hanging = []
+    for pce in SIDE_PIECES[actor_side]:
+        if pce in (Pieces.wK, Pieces.bK):
+            continue
+        for i in range(board.pce_num[pce]):
+            sq = board.p_list[pce][i]
+            if sq == Square.NO_SQ:
+                continue
+            if board.is_sq_attacked(sq, enemy) and not board.is_sq_attacked(sq, actor_side):
+                hanging.append((PieceVal[pce], pce, sq))
+
+    if hanging:
+        hanging.sort(reverse=True)
+        top = hanging[0]
+        warnings.append(
+            f"Hanging piece warning: {_sq_to_alg(top[2])} {PIECE_NAME[top[1]]} is attacked and undefended."
+        )
+
+    # Board is already in post-move state; side to move should be enemy.
+    if board.side == enemy:
+        move_list = MoveList()
+        GenerateAllMoves(board, move_list)
+        checking_moves = []
+        for i in range(move_list.count):
+            mv = move_list.moves[i].move
+            if not MakeMove(board, mv):
+                continue
+            gives_check = board.is_sq_attacked(board.king_sq[actor_side], enemy)
+            TakeMove(board)
+            if gives_check:
+                checking_moves.append(mv)
+            if len(checking_moves) >= 2:
+                break
+        if checking_moves:
+            warnings.append(
+                f"Forcing warning: opponent has checking resource(s), e.g. {PrMove(checking_moves[0])}."
+            )
+
+    own_pin_motifs = _find_pins_to_queen(board, actor_side)
+    if own_pin_motifs:
+        motif = own_pin_motifs[0]
+        warnings.append(
+            f"Pin warning: {PIECE_NAME[motif['pinned_piece']].capitalize()} at {_sq_to_alg(motif['pinned_sq'])} is pinned to queen at {_sq_to_alg(motif['queen_sq'])}."
+        )
+
+    return warnings[:4]
+
+
+def build_move_feedback(board, move, actor_side, actor_label, previous_enemy_ideas=None, planned_pv=None):
     if board.side != actor_side:
         return {
             "actor": actor_label,
@@ -531,6 +631,8 @@ def build_move_feedback(board, move, actor_side, actor_label, previous_enemy_ide
             "highlights": [],
             "tactical_alerts": [],
             "defensive_updates": [],
+            "plan_lines": [],
+            "basic_warnings": [],
             "own_ideas": [],
             "enemy_ideas": [],
             "countered_enemy_ideas": [],
@@ -558,6 +660,8 @@ def build_move_feedback(board, move, actor_side, actor_label, previous_enemy_ide
             "highlights": [],
             "tactical_alerts": [],
             "defensive_updates": [],
+            "plan_lines": [],
+            "basic_warnings": [],
             "own_ideas": [],
             "enemy_ideas": [],
             "countered_enemy_ideas": [],
@@ -600,6 +704,8 @@ def build_move_feedback(board, move, actor_side, actor_label, previous_enemy_ide
         after_enemy_pins,
     )
     defensive_updates = _queen_defense_lines(moved_piece_before, TOSQ(move), countered_enemy_items)
+    plan_lines = _plan_lines_from_pv(move, actor_side, actor_label, planned_pv or [])
+    basic_warnings = _basic_warning_lines(board, actor_side)
     lines.append(
         f"Position map now: {len(own_ideas)} active plans for {actor_label}, {len(enemy_ideas)} opponent ideas to track."
     )
@@ -618,6 +724,8 @@ def build_move_feedback(board, move, actor_side, actor_label, previous_enemy_ide
         "highlights": lines[:5],
         "tactical_alerts": tactical_alerts[:4],
         "defensive_updates": defensive_updates[:3],
+        "plan_lines": plan_lines[:3],
+        "basic_warnings": basic_warnings[:4],
         "own_ideas": own_ideas,
         "enemy_ideas": enemy_ideas,
         "countered_enemy_ideas": countered_enemy_ideas[:5],
